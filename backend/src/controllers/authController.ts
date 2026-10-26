@@ -11,16 +11,22 @@ const generateToken = (id: string): string => {
   });
 };
 
-const sendVerificationEmail = async (email: string, name: string, token: string): Promise<boolean> => {
+interface SendEmailResult {
+  success: boolean;
+  previewUrl?: string | false;
+}
+
+const sendVerificationEmail = async (email: string, name: string, token: string): Promise<SendEmailResult> => {
   try {
-    const host = process.env.EMAIL_HOST || "smtp.gmail.com";
-    const port = Number(process.env.EMAIL_PORT) || 465;
-    const user = process.env.EMAIL_USER;
-    const pass = process.env.EMAIL_PASS;
+    const host = process.env.SMTP_HOST || process.env.EMAIL_HOST || "smtp.ethereal.email";
+    const port = Number(process.env.SMTP_PORT || process.env.EMAIL_PORT) || 587;
+    const user = process.env.SMTP_USER || process.env.EMAIL_USER;
+    const pass = process.env.SMTP_PASS || process.env.EMAIL_PASS;
+    const fromEmail = process.env.EMAIL_FROM || user || "support@corewatch.ai";
 
     if (!user || !pass) {
       console.warn("SMTP credentials not configured. Verification email will not be sent.");
-      return false;
+      return { success: false };
     }
 
     const transporter = nodemailer.createTransport({
@@ -154,18 +160,22 @@ const sendVerificationEmail = async (email: string, name: string, token: string)
     `;
 
     const mailOptions = {
-      from: `"CoreWatch Account Support" <${user}>`,
+      from: `"CoreWatch Support" <${fromEmail}>`,
       to: email,
       subject: "Action Required: Verify Your CoreWatch Account",
       html: htmlContent,
     };
 
-    await transporter.sendMail(mailOptions);
-    console.log(`Verification email sent to ${email}`);
-    return true;
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`Verification email sent to ${email}. Message ID: ${info.messageId}`);
+    const previewUrl = nodemailer.getTestMessageUrl(info);
+    if (previewUrl) {
+      console.log(`📬 Ethereal Email Preview URL: ${previewUrl}`);
+    }
+    return { success: true, previewUrl };
   } catch (error) {
     console.error("Failed to send verification email:", error);
-    return false;
+    return { success: false };
   }
 };
 
@@ -199,11 +209,12 @@ export const registerUser = async (req: Request, res: Response): Promise<void> =
     });
 
     if (user) {
-      const emailSent = await sendVerificationEmail(email, name, token);
+      const emailResult = await sendVerificationEmail(email, name, token);
       res.status(201).json({
         success: true,
         message: "Registration successful! A verification email has been sent. Please check your inbox.",
-        emailSent,
+        emailSent: emailResult.success,
+        previewUrl: emailResult.previewUrl || undefined,
       });
     } else {
       res.status(400).json({ success: false, message: "Invalid user data" });
@@ -292,7 +303,7 @@ export const verifyEmail = async (req: Request, res: Response): Promise<void> =>
       customer = await Customer.create({
         user: user._id,
         status: "Pending",
-        cameras: 5,
+        cameras: 1,
         plan: "Demo Free",
       });
     }

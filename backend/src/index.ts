@@ -85,6 +85,19 @@ app.patch("/api/plans/:id", protect, isAdmin, updatePlan);
 app.patch("/api/plans/:id/toggle-status", protect, isAdmin, toggleStatus);
 app.delete("/api/plans/:id", protect, isAdmin, deletePlan);
 
+// Import invoice controllers
+import { getInvoices, createInvoice } from "./controllers/invoiceController";
+
+// Invoice Routes
+app.get("/api/invoices", protect, getInvoices);
+app.post("/api/invoices", protect, isAdmin, createInvoice);
+
+// Razorpay Payment Routes
+import { getPaymentConfig, createOrder, verifyPayment } from "./controllers/paymentController";
+app.get("/api/payment/config", protect, getPaymentConfig);
+app.post("/api/payment/create-order", protect, createOrder);
+app.post("/api/payment/verify-payment", protect, verifyPayment);
+
 // Serve Static Uploads (for CCTV snapshots)
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 

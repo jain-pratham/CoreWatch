@@ -66,6 +66,11 @@ export default function LoginPage() {
         localStorage.setItem('token', data.data.token);
         localStorage.setItem('user', JSON.stringify(data.data));
 
+        // When test user logs in, flag session to auto-open direct camera connect modal
+        if (data.data.email === 'test@gmail.com' || formData.email.toLowerCase().trim() === 'test@gmail.com') {
+          sessionStorage.setItem('openDirectConnectModal', 'true');
+        }
+
         // Auto redirect after brief success indicator
         setTimeout(() => {
           router.push('/dashboard');

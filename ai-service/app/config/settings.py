@@ -16,6 +16,7 @@ class Settings:
     IMGBB_API_KEY: str = os.getenv("IMGBB_API_KEY", "")
     NEXTJS_ALERT_API: str = os.getenv("NEXTJS_ALERT_API", "http://localhost:3000/api/alerts")
     ALERT_COOLDOWN: int = int(os.getenv("ALERT_COOLDOWN", "10"))
+    ZONE_COOLDOWN_SECONDS: int = int(os.getenv("ZONE_COOLDOWN_SECONDS", "30"))
     BACKEND_API_URL: str = os.getenv("BACKEND_API_URL", "http://localhost:5000")
     AI_SERVICE_API_KEY: str = os.getenv("AI_SERVICE_API_KEY", "")
 
@@ -30,6 +31,8 @@ class Settings:
     ZONE_REFRESH_SECONDS: int = int(os.getenv("ZONE_REFRESH_SECONDS", "30"))
     CAMERA_OFFLINE_AFTER_SECONDS: int = int(os.getenv("CAMERA_OFFLINE_AFTER_SECONDS", "30"))
     TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Kolkata")
+    SHOP_OPENING_TIME: str = os.getenv("SHOP_OPENING_TIME", "09:00")
+    SHOP_CLOSING_TIME: str = os.getenv("SHOP_CLOSING_TIME", "22:00")
     
     # Tampering Detection Heuristics
     CAMERA_TAMPERING_THRESHOLD: float = float(os.getenv("CAMERA_TAMPERING_THRESHOLD", "0.3"))

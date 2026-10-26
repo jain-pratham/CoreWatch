@@ -6,10 +6,26 @@ export interface ICamera extends Document {
   shopId?: mongoose.Types.ObjectId;
   locationName?: string;
   name?: string;
+  ipAddress?: string;
+  port?: number;
+  username?: string;
+  password?: string;
+  rtspUrl?: string;
+  manufacturer?: string;
+  cameraModel?: string;
   secretToken?: string;
   streamType?: string;
   streamUrl?: string;
   status?: string;
+  humanDetection?: boolean;
+  zoneMonitoring?: boolean;
+  afterHoursSecurity?: boolean;
+  suspiciousMovement?: boolean;
+  cameraHealth?: boolean;
+  restrictedZoneEntry?: boolean;
+  zoneLoiteringDwell?: boolean;
+  valuableAreaActivity?: boolean;
+  cashCounterActivity?: boolean;
 }
 
 const CameraSchema = new Schema<ICamera>(
@@ -37,6 +53,34 @@ const CameraSchema = new Schema<ICamera>(
       type: String,
       trim: true,
     },
+    ipAddress: {
+      type: String,
+      trim: true,
+    },
+    port: {
+      type: Number,
+      default: 554,
+    },
+    username: {
+      type: String,
+      trim: true,
+    },
+    password: {
+      type: String,
+      select: false,
+    },
+    rtspUrl: {
+      type: String,
+      trim: true,
+    },
+    manufacturer: {
+      type: String,
+      trim: true,
+    },
+    cameraModel: {
+      type: String,
+      trim: true,
+    },
     secretToken: {
       type: String,
     },
@@ -51,6 +95,42 @@ const CameraSchema = new Schema<ICamera>(
     status: {
       type: String,
       default: "ONLINE",
+    },
+    humanDetection: {
+      type: Boolean,
+      default: true,
+    },
+    zoneMonitoring: {
+      type: Boolean,
+      default: true,
+    },
+    afterHoursSecurity: {
+      type: Boolean,
+      default: true,
+    },
+    suspiciousMovement: {
+      type: Boolean,
+      default: true,
+    },
+    cameraHealth: {
+      type: Boolean,
+      default: true,
+    },
+    restrictedZoneEntry: {
+      type: Boolean,
+      default: true,
+    },
+    zoneLoiteringDwell: {
+      type: Boolean,
+      default: true,
+    },
+    valuableAreaActivity: {
+      type: Boolean,
+      default: true,
+    },
+    cashCounterActivity: {
+      type: Boolean,
+      default: true,
     },
   },
   {

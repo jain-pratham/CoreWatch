@@ -14,7 +14,7 @@ class ZoneRulesEngine:
     State machine keeping track of zone entries, exits, dwell times,
     and alert states for each (cameraId, zoneId, trackId).
     """
-    def __init__(self, track_lost_grace_seconds: float = 2.0):
+    def __init__(self, track_lost_grace_seconds: float = 6.0):
         # Key: (cameraId, zoneId, trackId) -> dict with keys: entered_at, last_seen, alert_triggered
         self.states = {}
         self.track_lost_grace_seconds = track_lost_grace_seconds

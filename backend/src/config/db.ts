@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import User from "../models/User";
 import Plan from "../models/Plan";
+import Customer from "../models/Customer";
 
 let mongod: MongoMemoryServer | null = null;
 
@@ -49,6 +50,42 @@ const seedDefaultUsers = async (): Promise<void> => {
         isVerified: true,
       });
       console.log(`Default Demo created: ${demoEmail}`);
+    }
+
+    // 4. Test User Account (Full Features & Unlimited Cameras)
+    const testEmail = process.env.test_user || process.env.TEST_USER || "test@gmail.com";
+    const testPassword = process.env.test_password || process.env.TEST_PASSWORD || "test@123";
+    let testUser = await User.findOne({ email: testEmail });
+    if (!testUser) {
+      testUser = await User.create({
+        name: "Test User",
+        email: testEmail,
+        password: testPassword,
+        role: "user",
+        isVerified: true,
+      });
+      console.log(`Default Test User created: ${testEmail}`);
+    } else {
+      testUser.isVerified = true;
+      await testUser.save();
+    }
+
+    let testCustomer = await Customer.findOne({ user: testUser._id });
+    if (!testCustomer) {
+      await Customer.create({
+        user: testUser._id,
+        company: "CoreWatch Test Enterprise",
+        phone: "+91 9999999999",
+        cameras: 999,
+        plan: "Enterprise Max",
+        status: "Active",
+      });
+      console.log(`Active Customer profile created for: ${testEmail}`);
+    } else {
+      testCustomer.status = "Active";
+      testCustomer.plan = "Enterprise Max";
+      testCustomer.cameras = 999;
+      await testCustomer.save();
     }
   } catch (error) {
     console.error("Error seeding default users:", error);

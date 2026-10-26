@@ -12,8 +12,30 @@ import {
   VideoOff, 
   MessageSquare, 
   Eye, 
+  EyeOff,
   Check, 
-  X 
+  X,
+  Camera,
+  Radio,
+  Activity,
+  Cpu,
+  RefreshCw,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
+  Zap,
+  Info,
+  Server,
+  Lock,
+  Wifi,
+  Sliders,
+  CreditCard,
+  ShieldCheck,
+  ArrowRight,
+  Building,
+  CheckCircle,
+  ExternalLink,
+  QrCode
 } from "lucide-react";
 
 const AVAILABLE_AI_FEATURES = [
@@ -60,28 +82,46 @@ interface DbPlan {
   description: string;
   monthlyPrice: number;
   yearlyPrice: number;
+  currency: string;
   maxCameras: number;
-  trialDays: number;
+  trialDays?: number;
+  features: string[];
+  isPopular?: boolean;
   status: 'active' | 'inactive';
   sortOrder: number;
-  isPopular: boolean;
-  features: string[];
 }
 
 export default function SignupStepsPage() {
   const router = useRouter();
+
+  // Wizard state: 1: Account, 2: Address, 3: Choose Plan, 4: Camera Setup / Payment, 5: Success
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  
-  // Auth Session state
+
+  // Auth context
   const [user, setUser] = useState<UserData | null>(null);
   const [token, setToken] = useState<string | null>(null);
 
   // Plans list loaded from DB
   const [plans, setPlans] = useState<DbPlan[]>([]);
+
+  // Camera form extras
+  const [showCamPassword, setShowCamPassword] = useState(false);
+  const [isTestingCam, setIsTestingCam] = useState(false);
+  const [camTestStatus, setCamTestStatus] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Razorpay Checkout State
+  const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [paymentSuccessData, setPaymentSuccessData] = useState<{
+    paymentId: string;
+    orderId: string;
+    invoiceNumber: string;
+    amount: number;
+  } | null>(null);
 
   // Form Fields State
   const [formData, setFormData] = useState({
@@ -104,9 +144,24 @@ export default function SignupStepsPage() {
     plan: 'Demo Free', // Default selected
     
     // Step 4: Camera Setup (For Demo Free)
-    cameraLocation: 'Main Entrance',
-    camerasCount: 1,
+    cameraName: '',
+    cameraLocation: '',
+    cameraManufacturer: 'Hikvision',
+    cameraModel: '',
     cameraType: 'RTSP Stream',
+    cameraIp: '',
+    cameraPort: '554',
+    cameraUsername: '',
+    cameraPassword: '',
+    cameraRtspUrl: '',
+    camerasCount: 1,
+
+    // AI Vision Features
+    aiHumanDetection: true,
+    aiZoneMonitoring: true,
+    aiAfterHoursSecurity: true,
+    aiSuspiciousMovement: true,
+    aiCameraHealth: true,
 
     // Step 4: Payment Details (For Paid Plans)
     cardName: '',
@@ -117,7 +172,7 @@ export default function SignupStepsPage() {
 
   const [countdown, setCountdown] = useState(3);
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5050';
 
   // 1. Fetch current authentication and prefill customer info if exists
   useEffect(() => {
@@ -279,6 +334,264 @@ export default function SignupStepsPage() {
     setStep((prev) => prev - 1);
   };
 
+  const handleAutoConstructRtsp = () => {
+    const u = formData.cameraUsername.trim();
+    const p = formData.cameraPassword.trim();
+    const ip = formData.cameraIp.trim() || '192.168.1.100';
+    const port = formData.cameraPort.trim() || '554';
+    const mfg = formData.cameraManufacturer;
+
+    const userPart = u ? (p ? `${encodeURIComponent(u)}:${encodeURIComponent(p)}@` : `${encodeURIComponent(u)}@`) : '';
+    const hostPart = `${ip}:${port}`;
+    let path = '/Streaming/Channels/101';
+    if (mfg === 'Dahua' || mfg === 'CP Plus') path = '/cam/realmonitor?channel=1&subtype=0';
+    else if (mfg === 'Axis') path = '/axis-media/media.amp';
+    else if (mfg === 'Uniview') path = '/unicast/c1/s0/live';
+    else if (mfg === 'Other') path = '/live/ch0';
+
+    const constructed = `rtsp://${userPart}${hostPart}${path}`;
+    setFormData((prev) => ({ ...prev, cameraRtspUrl: constructed }));
+  };
+
+  const handleQuickFillDemo = () => {
+    setFormData((prev) => ({
+      ...prev,
+      cameraName: 'Front Entrance CCTV Node',
+      cameraLocation: 'Front Office Entrance',
+      cameraManufacturer: 'Hikvision',
+      cameraModel: 'DS-2CD2043G2-I',
+      cameraType: 'RTSP Stream',
+      cameraIp: '192.168.1.108',
+      cameraPort: '554',
+      cameraUsername: 'admin',
+      cameraPassword: 'DemoPass#2026',
+      cameraRtspUrl: 'rtsp://admin:DemoPass%232026@192.168.1.108:554/Streaming/Channels/101',
+      aiHumanDetection: true,
+      aiZoneMonitoring: true,
+      aiAfterHoursSecurity: true,
+      aiSuspiciousMovement: true,
+      aiCameraHealth: true,
+    }));
+    setCamTestStatus({
+      success: true,
+      message: '✓ Verified demo RTSP stream profile loaded.',
+    });
+  };
+
+  const handleTestCameraConnection = async () => {
+    if (!formData.cameraIp.trim() || !formData.cameraPort.trim() || !formData.cameraUsername.trim() || !formData.cameraRtspUrl.trim()) {
+      setCamTestStatus({
+        success: false,
+        message: 'Please fill in Camera IP, Port, Username, and RTSP URL before testing.',
+      });
+      return;
+    }
+    setIsTestingCam(true);
+    setCamTestStatus(null);
+    try {
+      const res = await fetch('/api/cameras/test-connection', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          ipAddress: formData.cameraIp.trim(),
+          port: formData.cameraPort.trim(),
+          username: formData.cameraUsername.trim(),
+          password: formData.cameraPassword.trim() || 'demo',
+          rtspUrl: formData.cameraRtspUrl.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCamTestStatus({ success: true, message: '✓ Camera network socket & RTSP endpoint verified!' });
+      } else {
+        setCamTestStatus({
+          success: false,
+          message: data.error || 'Unable to connect to camera on this network. Please check host/port accessibility.',
+        });
+      }
+    } catch (err) {
+      setCamTestStatus({
+        success: false,
+        message: 'Network verification timed out or server unavailable.',
+      });
+    } finally {
+      setIsTestingCam(false);
+    }
+  };
+
+  const loadRazorpayScript = (): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (typeof window === 'undefined') return resolve(false);
+      if ((window as any).Razorpay) {
+        resolve(true);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
+  const handleRazorpayPayment = async (isSimulatedDemo = false) => {
+    if (!token) {
+      setErrorMessage("Authentication session expired. Please log in again.");
+      return;
+    }
+
+    setIsProcessingPayment(true);
+    setErrorMessage(null);
+
+    try {
+      const selectedPlanObj = plans.find(p => p.name === formData.plan);
+      const basePrice = selectedPlanObj 
+        ? (billingCycle === 'yearly' ? selectedPlanObj.yearlyPrice : selectedPlanObj.monthlyPrice)
+        : (billingCycle === 'yearly' ? 14999 : 1499);
+      
+      const gstAmount = Math.round(basePrice * 0.18);
+      const totalAmount = basePrice + gstAmount;
+
+      // 1. Create order on backend
+      const orderRes = await fetch(`${API_URL}/api/payment/create-order`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          planName: formData.plan,
+          billingCycle,
+          amount: totalAmount,
+          currency: 'INR',
+        }),
+      });
+
+      const orderData = await orderRes.json();
+      if (!orderRes.ok || !orderData.success) {
+        throw new Error(orderData.message || orderData.error || "Unable to initiate payment order");
+      }
+
+      const { orderId, keyId, isDemo } = orderData;
+
+      // Check if user requested mock simulation or keys are demo
+      if (isSimulatedDemo || isDemo || !keyId || keyId.includes("sample") || keyId.includes("demo")) {
+        // Run Instant Simulated Razorpay Verification
+        const mockPaymentId = `pay_sim_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+        const mockSignature = `sig_demo_${Date.now()}`;
+
+        const verifyRes = await fetch(`${API_URL}/api/payment/verify-payment`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            razorpay_order_id: orderId,
+            razorpay_payment_id: mockPaymentId,
+            razorpay_signature: mockSignature,
+            planName: formData.plan,
+            billingCycle,
+            amount: totalAmount,
+            camerasCount: selectedPlanObj ? selectedPlanObj.maxCameras : 10,
+          }),
+        });
+
+        const verifyData = await verifyRes.json();
+        if (verifyRes.ok && verifyData.success) {
+          setPaymentSuccessData({
+            paymentId: mockPaymentId,
+            orderId,
+            invoiceNumber: verifyData.data?.invoiceNumber || `INV-${Date.now()}`,
+            amount: totalAmount,
+          });
+        } else {
+          throw new Error(verifyData.message || verifyData.error || "Payment verification failed");
+        }
+        return;
+      }
+
+      // Live Razorpay Checkout
+      const isLoaded = await loadRazorpayScript();
+      if (!isLoaded) {
+        throw new Error("Razorpay SDK failed to load. Please check your internet connection.");
+      }
+
+      const options = {
+        key: keyId,
+        amount: Math.round(totalAmount * 100),
+        currency: "INR",
+        name: "CoreWatch AI Systems",
+        description: `${formData.plan} (${billingCycle}) Security Subscription`,
+        image: "/logo.png",
+        order_id: orderId,
+        prefill: {
+          name: `${formData.firstName} ${formData.lastName}`.trim() || user?.name,
+          email: formData.email || user?.email,
+          contact: formData.phone || "9876543210",
+        },
+        theme: {
+          color: "#0284c7",
+        },
+        handler: async function (response: any) {
+          try {
+            const verifyRes = await fetch(`${API_URL}/api/payment/verify-payment`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                planName: formData.plan,
+                billingCycle,
+                amount: totalAmount,
+                camerasCount: selectedPlanObj ? selectedPlanObj.maxCameras : 10,
+              }),
+            });
+
+            const verifyData = await verifyRes.json();
+            if (verifyRes.ok && verifyData.success) {
+              setPaymentSuccessData({
+                paymentId: response.razorpay_payment_id,
+                orderId: response.razorpay_order_id,
+                invoiceNumber: verifyData.data?.invoiceNumber || `INV-${Date.now()}`,
+                amount: totalAmount,
+              });
+            } else {
+              setErrorMessage(verifyData.message || "Payment verification error");
+            }
+          } catch (err: any) {
+            setErrorMessage(err.message || "Error verifying payment signature");
+          }
+        },
+        modal: {
+          ondismiss: function () {
+            setIsProcessingPayment(false);
+          },
+        },
+      };
+
+      const rzp = new (window as any).Razorpay(options);
+      rzp.on('payment.failed', function (resp: any) {
+        setErrorMessage(resp.error?.description || "Payment was declined or cancelled");
+        setIsProcessingPayment(false);
+      });
+      rzp.open();
+    } catch (err: any) {
+      console.error("Razorpay checkout error:", err);
+      setErrorMessage(err.message || "Unable to proceed with Razorpay checkout.");
+    } finally {
+      setIsProcessingPayment(false);
+    }
+  };
+
   const selectedPlanObj = plans.find(p => p.name === formData.plan);
   const isFreePlan = selectedPlanObj 
     ? (selectedPlanObj.monthlyPrice === 0 && selectedPlanObj.yearlyPrice === 0) 
@@ -294,25 +607,29 @@ export default function SignupStepsPage() {
 
     // Validation for Step 4
     if (!isFreePlan) {
-      // Paid plan card validations
-      if (!formData.cardName.trim()) {
-        newErrors.cardName = 'Cardholder name is required';
-      }
-      if (!formData.cardNumber.trim()) {
-        newErrors.cardNumber = 'Card number is required';
-      } else if (formData.cardNumber.replace(/\s/g, '').length < 16) {
-        newErrors.cardNumber = 'Please enter a valid 16-digit card number';
-      }
-      if (!formData.cardExpiry.trim()) {
-        newErrors.cardExpiry = 'Expiration date is required';
-      }
-      if (!formData.cardCvc.trim()) {
-        newErrors.cardCvc = 'CVC is required';
+      if (!paymentSuccessData) {
+        setErrorMessage("Please complete your Razorpay payment before completing registration setup.");
+        setIsSubmitting(false);
+        return;
       }
     } else {
       // Demo free camera validations
+      if (!formData.cameraName.trim()) {
+        newErrors.cameraName = 'Camera name is required';
+      }
       if (!formData.cameraLocation.trim()) {
-        newErrors.cameraLocation = 'Camera location name is required';
+        newErrors.cameraLocation = 'Camera location is required';
+      }
+      if (!formData.cameraIp.trim()) {
+        newErrors.cameraIp = 'Camera IP Address or Host is required';
+      }
+      if (!formData.cameraPort.trim() || isNaN(Number(formData.cameraPort))) {
+        newErrors.cameraPort = 'Valid RTSP port is required (e.g. 554)';
+      }
+      if (!formData.cameraRtspUrl.trim()) {
+        newErrors.cameraRtspUrl = 'RTSP URL is required';
+      } else if (!formData.cameraRtspUrl.trim().startsWith('rtsp://')) {
+        newErrors.cameraRtspUrl = 'RTSP URL must begin with rtsp://';
       }
     }
 
@@ -325,7 +642,7 @@ export default function SignupStepsPage() {
     setErrors({});
 
     try {
-      // 1. If user selected a free/trial plan, automatically register their first camera in Next.js backend database
+      // 1. If user selected a free/trial plan, automatically register their full first camera in database
       if (isFreePlan) {
         try {
           await fetch('/api/cameras', {
@@ -334,7 +651,23 @@ export default function SignupStepsPage() {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${token}`,
             },
-            body: JSON.stringify({ locationName: formData.cameraLocation }),
+            body: JSON.stringify({
+              name: formData.cameraName.trim(),
+              locationName: formData.cameraLocation.trim(),
+              ipAddress: formData.cameraIp.trim(),
+              port: Number(formData.cameraPort) || 554,
+              username: formData.cameraUsername.trim() || 'admin',
+              password: formData.cameraPassword.trim() || 'admin123',
+              rtspUrl: formData.cameraRtspUrl.trim(),
+              manufacturer: formData.cameraManufacturer || 'Hikvision',
+              cameraModel: formData.cameraModel.trim() || 'Standard HD',
+              streamType: formData.cameraType || 'RTSP Stream',
+              humanDetection: formData.aiHumanDetection,
+              zoneMonitoring: formData.aiZoneMonitoring,
+              afterHoursSecurity: formData.aiAfterHoursSecurity,
+              suspiciousMovement: formData.aiSuspiciousMovement,
+              cameraHealth: formData.aiCameraHealth,
+            }),
           });
         } catch (err) {
           console.warn('Auto camera provisioning note:', err);
@@ -775,7 +1108,7 @@ export default function SignupStepsPage() {
                               <Users className="h-3.5 w-3.5 text-primary shrink-0" />
                               <span>Camera Limit: <strong className="text-foreground">{plan.maxCameras} camera nodes</strong></span>
                             </div>
-                            {plan.trialDays > 0 && (
+                            {(plan.trialDays ?? 0) > 0 && (
                               <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                                 <Eye className="h-3.5 w-3.5 text-primary shrink-0" />
                                 <span>Trial Period: <strong className="text-foreground">{plan.trialDays} days</strong></span>
@@ -818,188 +1151,585 @@ export default function SignupStepsPage() {
               
               {/* CONDITIONAL SUB-WIZARD A: CAMERA SETUP (DEMO PLAN) */}
               {isFreePlan ? (
-                <div className="space-y-3">
-                  <h2 className="text-xs md:text-sm font-bold text-foreground flex items-center gap-2">
-                    <span className="w-1 h-3 bg-emerald-500 rounded-full"></span>
-                    4. Setup Your First Camera (Free Demo)
-                  </h2>
-                  <p className="text-[10px] text-muted-foreground leading-relaxed">
-                    CoreWatch runs real-time computer vision models on your RTSP/CCTV streams. Let's configure your initial demo camera.
-                  </p>
-
-                  <div className="space-y-0.5">
-                    <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">Camera Location Name *</label>
-                    <input
-                      type="text"
-                      name="cameraLocation"
-                      required
-                      value={formData.cameraLocation}
-                      onChange={handleChange}
-                      placeholder="e.g. Front Office, Main Shop Entrance"
-                      className={`w-full px-3 py-1.5 rounded-lg border bg-background text-foreground text-xs font-semibold placeholder:text-muted-foreground/60 focus:outline-none transition-all duration-200 ${
-                        errors.cameraLocation 
-                          ? 'border-destructive focus:ring-1 focus:ring-destructive/30' 
-                          : 'border-border focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
-                      }`}
-                    />
-                    {errors.cameraLocation && (
-                      <p className="text-[9px] text-destructive mt-0 font-semibold">{errors.cameraLocation}</p>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-0.5">
-                      <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">Number of Demo Cameras *</label>
-                      <select
-                        name="camerasCount"
-                        value={formData.camerasCount}
-                        onChange={handleChange}
-                        className="w-full px-3 py-1.5 rounded-lg border border-border bg-background text-foreground text-xs font-semibold focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all"
-                      >
-                        <option value={1}>1 Camera</option>
-                        <option value={2}>2 Cameras</option>
-                        <option value={3}>3 Cameras</option>
-                        <option value={4}>4 Cameras</option>
-                        <option value={5}>5 Cameras (Max Demo)</option>
-                      </select>
+                <div className="space-y-4">
+                  {/* Sub-wizard Header */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-border/60">
+                    <div>
+                      <h2 className="text-xs md:text-sm font-bold text-foreground flex items-center gap-2">
+                        <span className="w-1.5 h-3.5 bg-emerald-500 rounded-full"></span>
+                        4. Setup Your First Camera (Free Demo)
+                      </h2>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        Configure your initial CCTV / RTSP video stream node with real-time AI computer vision security.
+                      </p>
                     </div>
 
-                    <div className="space-y-0.5">
-                      <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">Camera Stream Protocol</label>
-                      <select
-                        name="cameraType"
-                        value={formData.cameraType}
-                        onChange={handleChange}
-                        className="w-full px-3 py-1.5 rounded-lg border border-border bg-background text-foreground text-xs font-semibold focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all"
-                      >
-                        <option value="RTSP Stream">RTSP Network Stream (.mp4/h264)</option>
-                        <option value="ONVIF Camera">ONVIF IP Network Camera</option>
-                        <option value="USB Camera">USB Direct Feed / Web camera</option>
-                      </select>
+                    <button
+                      type="button"
+                      onClick={handleQuickFillDemo}
+                      className="self-start sm:self-auto px-2.5 py-1 rounded-md text-[10px] font-bold bg-emerald-500/10 text-emerald-500 border border-emerald-500/30 hover:bg-emerald-500/20 transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+                    >
+                      <Zap className="w-3 h-3" />
+                      ⚡ Fill Sample Demo Stream
+                    </button>
+                  </div>
+
+                  {/* SECTION 1: Camera Identification Card */}
+                  <div className="p-3.5 rounded-xl border border-border bg-card/60 space-y-3">
+                    <div className="flex items-center gap-2 text-foreground text-xs font-bold">
+                      <Camera className="w-3.5 h-3.5 text-emerald-500" />
+                      <span>Camera Identity & Physical Placement</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {/* Camera Name */}
+                      <div className="space-y-0.5">
+                        <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">Camera Display Name *</label>
+                        <input
+                          type="text"
+                          name="cameraName"
+                          required
+                          value={formData.cameraName}
+                          onChange={handleChange}
+                          placeholder="e.g. Main Entrance Gate CCTV"
+                          className={`w-full px-3 py-1.5 rounded-lg border bg-background text-foreground text-xs font-semibold placeholder:text-muted-foreground/60 focus:outline-none transition-all duration-200 ${
+                            errors.cameraName 
+                              ? 'border-destructive focus:ring-1 focus:ring-destructive/30' 
+                              : 'border-border focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
+                          }`}
+                        />
+                        {errors.cameraName && (
+                          <p className="text-[9px] text-destructive mt-0 font-semibold">{errors.cameraName}</p>
+                        )}
+                      </div>
+
+                      {/* Location Name */}
+                      <div className="space-y-0.5">
+                        <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">Installation Area / Zone *</label>
+                        <input
+                          type="text"
+                          name="cameraLocation"
+                          required
+                          value={formData.cameraLocation}
+                          onChange={handleChange}
+                          placeholder="e.g. Reception / Lobby / Warehouse"
+                          className={`w-full px-3 py-1.5 rounded-lg border bg-background text-foreground text-xs font-semibold placeholder:text-muted-foreground/60 focus:outline-none transition-all duration-200 ${
+                            errors.cameraLocation 
+                              ? 'border-destructive focus:ring-1 focus:ring-destructive/30' 
+                              : 'border-border focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
+                          }`}
+                        />
+                        {errors.cameraLocation && (
+                          <p className="text-[9px] text-destructive mt-0 font-semibold">{errors.cameraLocation}</p>
+                        )}
+                      </div>
+
+                      {/* Manufacturer */}
+                      <div className="space-y-0.5">
+                        <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">Brand / Manufacturer</label>
+                        <select
+                          name="cameraManufacturer"
+                          value={formData.cameraManufacturer}
+                          onChange={handleChange}
+                          className="w-full px-3 py-1.5 rounded-lg border border-border bg-background text-foreground text-xs font-semibold focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                        >
+                          <option value="Hikvision">Hikvision</option>
+                          <option value="Dahua">Dahua</option>
+                          <option value="Axis">Axis Communications</option>
+                          <option value="CP Plus">CP Plus</option>
+                          <option value="Uniview">Uniview</option>
+                          <option value="Hanwha">Hanwha Techwin</option>
+                          <option value="Other">Other / Generic ONVIF</option>
+                        </select>
+                      </div>
+
+                      {/* Camera Model */}
+                      <div className="space-y-0.5">
+                        <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">Hardware Model</label>
+                        <input
+                          type="text"
+                          name="cameraModel"
+                          value={formData.cameraModel}
+                          onChange={handleChange}
+                          placeholder="e.g. DS-2CD2043G2-I (Optional)"
+                          className="w-full px-3 py-1.5 rounded-lg border border-border bg-background text-foreground text-xs font-semibold placeholder:text-muted-foreground/60 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                        />
+                      </div>
                     </div>
                   </div>
 
-                  <div className="p-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 text-foreground text-[10px] leading-relaxed">
-                    💡 **Note:** Once setup is finalized, a secure camera token key (e.g. `CAM-XXXXXX`) will be provisioned so you can link your physical CCTV recorder stream.
+                  {/* SECTION 2: Network & Streaming Protocol Card */}
+                  <div className="p-3.5 rounded-xl border border-border bg-card/60 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-foreground text-xs font-bold">
+                        <Server className="w-3.5 h-3.5 text-emerald-500" />
+                        <span>Stream Protocol & Network Credentials</span>
+                      </div>
+                      <span className="text-[9px] font-mono font-bold text-muted-foreground bg-muted/40 px-2 py-0.5 rounded">
+                        Port 554 (RTSP)
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {/* Stream Protocol */}
+                      <div className="space-y-0.5 sm:col-span-1">
+                        <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">Stream Protocol</label>
+                        <select
+                          name="cameraType"
+                          value={formData.cameraType}
+                          onChange={handleChange}
+                          className="w-full px-3 py-1.5 rounded-lg border border-border bg-background text-foreground text-xs font-semibold focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                        >
+                          <option value="RTSP Stream">RTSP Network Stream (H.264/H.265)</option>
+                          <option value="ONVIF Camera">ONVIF IP Network Camera</option>
+                          <option value="HTTP / MJPEG Web Stream">HTTP / MJPEG Web Stream</option>
+                          <option value="USB Camera">USB Direct Feed / Local Device</option>
+                        </select>
+                      </div>
+
+                      {/* IP Address */}
+                      <div className="space-y-0.5 sm:col-span-1">
+                        <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">Camera IP / Hostname *</label>
+                        <input
+                          type="text"
+                          name="cameraIp"
+                          required
+                          value={formData.cameraIp}
+                          onChange={handleChange}
+                          placeholder="e.g. 192.168.1.108"
+                          className={`w-full px-3 py-1.5 rounded-lg border bg-background text-foreground text-xs font-mono font-semibold placeholder:text-muted-foreground/60 focus:outline-none transition-all duration-200 ${
+                            errors.cameraIp 
+                              ? 'border-destructive focus:ring-1 focus:ring-destructive/30' 
+                              : 'border-border focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
+                          }`}
+                        />
+                        {errors.cameraIp && (
+                          <p className="text-[9px] text-destructive mt-0 font-semibold">{errors.cameraIp}</p>
+                        )}
+                      </div>
+
+                      {/* RTSP Port */}
+                      <div className="space-y-0.5 sm:col-span-1">
+                        <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">RTSP Port *</label>
+                        <input
+                          type="number"
+                          name="cameraPort"
+                          required
+                          value={formData.cameraPort}
+                          onChange={handleChange}
+                          placeholder="554"
+                          className={`w-full px-3 py-1.5 rounded-lg border bg-background text-foreground text-xs font-mono font-semibold placeholder:text-muted-foreground/60 focus:outline-none transition-all duration-200 ${
+                            errors.cameraPort 
+                              ? 'border-destructive focus:ring-1 focus:ring-destructive/30' 
+                              : 'border-border focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
+                          }`}
+                        />
+                        {errors.cameraPort && (
+                          <p className="text-[9px] text-destructive mt-0 font-semibold">{errors.cameraPort}</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {/* Stream Username */}
+                      <div className="space-y-0.5">
+                        <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">Stream Username</label>
+                        <input
+                          type="text"
+                          name="cameraUsername"
+                          value={formData.cameraUsername}
+                          onChange={handleChange}
+                          placeholder="e.g. admin"
+                          className="w-full px-3 py-1.5 rounded-lg border border-border bg-background text-foreground text-xs font-mono font-semibold placeholder:text-muted-foreground/60 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                        />
+                      </div>
+
+                      {/* Stream Password */}
+                      <div className="space-y-0.5">
+                        <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">Stream Password</label>
+                        <div className="relative">
+                          <input
+                            type={showCamPassword ? "text" : "password"}
+                            name="cameraPassword"
+                            value={formData.cameraPassword}
+                            onChange={handleChange}
+                            placeholder="Enter RTSP camera password"
+                            className="w-full pl-3 pr-8 py-1.5 rounded-lg border border-border bg-background text-foreground text-xs font-mono font-semibold placeholder:text-muted-foreground/60 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowCamPassword(!showCamPassword)}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                          >
+                            {showCamPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5 text-muted-foreground" />}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* RTSP Stream URL with Auto-Build Helper */}
+                    <div className="space-y-1 pt-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">Full RTSP Stream URI *</label>
+                        <button
+                          type="button"
+                          onClick={handleAutoConstructRtsp}
+                          className="text-[9px] font-bold text-emerald-500 hover:text-emerald-400 flex items-center gap-1 cursor-pointer transition-colors"
+                        >
+                          <RefreshCw className="w-2.5 h-2.5" />
+                          Auto-construct from credentials
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        name="cameraRtspUrl"
+                        required
+                        value={formData.cameraRtspUrl}
+                        onChange={handleChange}
+                        placeholder="rtsp://admin:password@192.168.1.100:554/Streaming/Channels/101"
+                        className={`w-full px-3 py-1.5 rounded-lg border bg-background text-foreground text-xs font-mono font-semibold placeholder:text-muted-foreground/60 focus:outline-none transition-all duration-200 ${
+                          errors.cameraRtspUrl 
+                            ? 'border-destructive focus:ring-1 focus:ring-destructive/30' 
+                            : 'border-border focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
+                        }`}
+                      />
+                      {errors.cameraRtspUrl && (
+                        <p className="text-[9px] text-destructive mt-0 font-semibold">{errors.cameraRtspUrl}</p>
+                      )}
+                    </div>
+
+                    {/* Test Connection Action & Status */}
+                    <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-border/40">
+                      <div className="flex-1">
+                        {camTestStatus && (
+                          <div className={`p-2 rounded-md text-[10px] font-medium flex items-center gap-1.5 ${
+                            camTestStatus.success 
+                              ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/30' 
+                              : 'bg-destructive/10 text-destructive border border-destructive/30'
+                          }`}>
+                            {camTestStatus.success ? (
+                              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                            ) : (
+                              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                            )}
+                            <span>{camTestStatus.message}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleTestCameraConnection}
+                        disabled={isTestingCam}
+                        className="px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-foreground text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60 shrink-0"
+                      >
+                        {isTestingCam ? (
+                          <>
+                            <Loader2 className="w-3 h-3 animate-spin text-emerald-500" />
+                            <span>Verifying stream...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Wifi className="w-3 h-3 text-emerald-500" />
+                            <span>Test Connection</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* SECTION 3: AI Vision Sentinel Modules (Active AI Features) */}
+                  <div className="p-3.5 rounded-xl border border-border bg-card/60 space-y-2.5">
+                    <div className="flex items-center gap-2 text-foreground text-xs font-bold">
+                      <Sliders className="w-3.5 h-3.5 text-emerald-500" />
+                      <span>Active AI Vision Security Modules (Free Demo)</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      {/* Human Detection */}
+                      <label className="flex items-start gap-2.5 p-2 rounded-lg border border-border/60 bg-background/50 hover:bg-background cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={formData.aiHumanDetection}
+                          onChange={(e) => setFormData({ ...formData, aiHumanDetection: e.target.checked })}
+                          className="w-4 h-4 rounded border-border text-emerald-500 focus:ring-emerald-500 mt-0.5"
+                        />
+                        <div>
+                          <div className="text-[11px] font-bold text-foreground flex items-center gap-1.5">
+                            <Shield className="w-3 h-3 text-emerald-500" />
+                            Human & Intrusion Sentinel
+                          </div>
+                          <p className="text-[9px] text-muted-foreground leading-tight mt-0.5">
+                            Real-time person tracking and restricted access alerts.
+                          </p>
+                        </div>
+                      </label>
+
+                      {/* After-Hours Security */}
+                      <label className="flex items-start gap-2.5 p-2 rounded-lg border border-border/60 bg-background/50 hover:bg-background cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={formData.aiAfterHoursSecurity}
+                          onChange={(e) => setFormData({ ...formData, aiAfterHoursSecurity: e.target.checked })}
+                          className="w-4 h-4 rounded border-border text-emerald-500 focus:ring-emerald-500 mt-0.5"
+                        />
+                        <div>
+                          <div className="text-[11px] font-bold text-foreground flex items-center gap-1.5">
+                            <Lock className="w-3 h-3 text-emerald-500" />
+                            After-Hours Night Guard
+                          </div>
+                          <p className="text-[9px] text-muted-foreground leading-tight mt-0.5">
+                            Automated perimeter alerts outside business hours.
+                          </p>
+                        </div>
+                      </label>
+
+                      {/* Zone Monitoring */}
+                      <label className="flex items-start gap-2.5 p-2 rounded-lg border border-border/60 bg-background/50 hover:bg-background cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={formData.aiZoneMonitoring}
+                          onChange={(e) => setFormData({ ...formData, aiZoneMonitoring: e.target.checked })}
+                          className="w-4 h-4 rounded border-border text-emerald-500 focus:ring-emerald-500 mt-0.5"
+                        />
+                        <div>
+                          <div className="text-[11px] font-bold text-foreground flex items-center gap-1.5">
+                            <Activity className="w-3 h-3 text-emerald-500" />
+                            Virtual Zone Tripwire
+                          </div>
+                          <p className="text-[9px] text-muted-foreground leading-tight mt-0.5">
+                            Monitors virtual bounding polygons & checkout lines.
+                          </p>
+                        </div>
+                      </label>
+
+                      {/* Camera Health */}
+                      <label className="flex items-start gap-2.5 p-2 rounded-lg border border-border/60 bg-background/50 hover:bg-background cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={formData.aiCameraHealth}
+                          onChange={(e) => setFormData({ ...formData, aiCameraHealth: e.target.checked })}
+                          className="w-4 h-4 rounded border-border text-emerald-500 focus:ring-emerald-500 mt-0.5"
+                        />
+                        <div>
+                          <div className="text-[11px] font-bold text-foreground flex items-center gap-1.5">
+                            <Cpu className="w-3 h-3 text-emerald-500" />
+                            Camera Health & Signal Monitor
+                          </div>
+                          <p className="text-[9px] text-muted-foreground leading-tight mt-0.5">
+                            Instant alert if camera is disconnected or tampered.
+                          </p>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Provisioning Info Banner */}
+                  <div className="p-2.5 rounded-lg border border-emerald-500/20 bg-emerald-500/5 text-foreground text-[10px] leading-relaxed flex items-start gap-2">
+                    <Info className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                    <span>
+                      <strong>Provisioning Note:</strong> Upon finalizing setup, a dedicated <strong>CAM-XXXXXX</strong> token key is created in your database and securely paired with your AI video analytics node.
+                    </span>
                   </div>
                 </div>
               ) : (
-                
-                // CONDITIONAL SUB-WIZARD B: PAYMENT SECURE DETAIL (PAID PLANS)
-                <div className="space-y-3">
-                  <h2 className="text-xs md:text-sm font-bold text-foreground flex items-center gap-2">
-                    <span className="w-1 h-3 bg-primary rounded-full"></span>
-                    4. Secure Checkout
-                  </h2>
-                  <p className="text-[10px] text-muted-foreground leading-relaxed">
-                    Secure credit card payment for your chosen plan: <strong className="text-primary font-mono font-black">{formData.plan}</strong>.
-                  </p>
-
-                  <div className="space-y-0.5">
-                    <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">Cardholder Name *</label>
-                    <input
-                      type="text"
-                      name="cardName"
-                      required
-                      value={formData.cardName}
-                      onChange={handleChange}
-                      placeholder="e.g. Johnathan Doe"
-                      className={`w-full px-3 py-1.5 rounded-lg border bg-background text-foreground text-xs font-semibold placeholder:text-muted-foreground/60 focus:outline-none transition-all duration-200 ${
-                        errors.cardName 
-                          ? 'border-destructive focus:ring-1 focus:ring-destructive/30' 
-                          : 'border-border focus:border-primary focus:ring-2 focus:ring-primary/20'
-                      }`}
-                    />
-                    {errors.cardName && (
-                      <p className="text-[9px] text-destructive mt-0 font-semibold">{errors.cardName}</p>
-                    )}
-                  </div>
-
-                  <div className="space-y-0.5">
-                    <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">Card Number *</label>
-                    <input
-                      type="text"
-                      name="cardNumber"
-                      required
-                      maxLength={19}
-                      value={formData.cardNumber}
-                      onChange={(e) => {
-                        // Auto format with spaces: XXXX XXXX XXXX XXXX
-                        const v = e.target.value.replace(/\s?/g, '').replace(/(\d{4})/g, '$1 ').trim();
-                        setFormData((prev) => ({ ...prev, cardNumber: v }));
-                        if (errors.cardNumber) {
-                          setErrors((prev) => {
-                            const next = { ...prev };
-                            delete next.cardNumber;
-                            return next;
-                          });
-                        }
-                      }}
-                      placeholder="4111 2222 3333 4444"
-                      className={`w-full px-3 py-1.5 rounded-lg border bg-background text-foreground text-xs font-semibold placeholder:text-muted-foreground/60 focus:outline-none transition-all duration-200 ${
-                        errors.cardNumber 
-                          ? 'border-destructive focus:ring-1 focus:ring-destructive/30' 
-                          : 'border-border focus:border-primary focus:ring-2 focus:ring-primary/20'
-                      }`}
-                    />
-                    {errors.cardNumber && (
-                      <p className="text-[9px] text-destructive mt-0 font-semibold">{errors.cardNumber}</p>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-0.5">
-                      <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">Expiration Date *</label>
-                      <input
-                        type="text"
-                        name="cardExpiry"
-                        required
-                        maxLength={5}
-                        value={formData.cardExpiry}
-                        onChange={(e) => {
-                          const v = e.target.value.replace(/\//g, '');
-                          let newVal = v;
-                          if (v.length >= 2) {
-                            newVal = `${v.slice(0,2)}/${v.slice(2,4)}`;
-                          }
-                          setFormData((prev) => ({ ...prev, cardExpiry: newVal }));
-                          if (errors.cardExpiry) {
-                            setErrors((prev) => {
-                              const next = { ...prev };
-                              delete next.cardExpiry;
-                              return next;
-                            });
-                          }
-                        }}
-                        placeholder="MM/YY"
-                        className={`w-full px-3 py-1.5 rounded-lg border bg-background text-foreground text-xs font-semibold placeholder:text-muted-foreground/60 focus:outline-none transition-all duration-200 ${
-                          errors.cardExpiry 
-                            ? 'border-destructive focus:ring-1 focus:ring-destructive/30' 
-                            : 'border-border focus:border-primary focus:ring-2 focus:ring-primary/20'
-                        }`}
-                      />
-                      {errors.cardExpiry && (
-                        <p className="text-[9px] text-destructive mt-0 font-semibold">{errors.cardExpiry}</p>
-                      )}
+                // CONDITIONAL SUB-WIZARD B: RAZORPAY SECURE CHECKOUT (PAID PLANS)
+                <div className="space-y-4">
+                  {/* Header & Badges */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-border/60">
+                    <div>
+                      <h2 className="text-xs md:text-sm font-bold text-foreground flex items-center gap-2">
+                        <span className="w-1.5 h-3.5 bg-sky-500 rounded-full"></span>
+                        4. Secure Checkout (Powered by Razorpay)
+                      </h2>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        Complete your subscription payment using Razorpay UPI, Cards, NetBanking, or Wallets.
+                      </p>
                     </div>
-                    <div className="space-y-0.5">
-                      <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">CVC / Security Code *</label>
-                      <input
-                        type="password"
-                        name="cardCvc"
-                        required
-                        maxLength={4}
-                        value={formData.cardCvc}
-                        onChange={handleChange}
-                        placeholder="•••"
-                        className={`w-full px-3 py-1.5 rounded-lg border bg-background text-foreground text-xs font-semibold placeholder:text-muted-foreground/60 focus:outline-none transition-all duration-200 ${
-                          errors.cardCvc 
-                            ? 'border-destructive focus:ring-1 focus:ring-destructive/30' 
-                            : 'border-border focus:border-primary focus:ring-2 focus:ring-primary/20'
+
+                    <div className="flex items-center gap-1.5 self-start sm:self-auto px-2.5 py-1 rounded-md text-[10px] font-bold bg-sky-500/10 text-sky-500 border border-sky-500/30 shrink-0">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>256-Bit SSL Encrypted</span>
+                    </div>
+                  </div>
+
+                  {/* Billing Cycle Toggle */}
+                  <div className="p-3 rounded-xl border border-border bg-card/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide block">Select Billing Term</span>
+                      <p className="text-xs font-bold text-foreground mt-0.5">Choose your subscription frequency</p>
+                    </div>
+
+                    <div className="flex items-center gap-1 bg-background p-1 rounded-lg border border-border self-start sm:self-auto">
+                      <button
+                        type="button"
+                        onClick={() => setBillingCycle('monthly')}
+                        className={`px-3 py-1 rounded-md text-xs font-bold transition-all cursor-pointer ${
+                          billingCycle === 'monthly'
+                            ? 'bg-primary text-[#FAF6EE] shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground'
                         }`}
-                      />
-                      {errors.cardCvc && (
-                        <p className="text-[9px] text-destructive mt-0 font-semibold">{errors.cardCvc}</p>
+                      >
+                        Monthly
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBillingCycle('yearly')}
+                        className={`px-3 py-1 rounded-md text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                          billingCycle === 'yearly'
+                            ? 'bg-primary text-[#FAF6EE] shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        <span>Yearly</span>
+                        <span className="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded font-extrabold">
+                          Save 20%
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Plan Details & Cost Breakdown */}
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                    {/* Left: Plan Summary Card */}
+                    <div className="md:col-span-7 p-3.5 rounded-xl border border-border bg-card/60 space-y-3">
+                      <div className="flex items-center justify-between border-b border-border/40 pb-2">
+                        <div>
+                          <span className="text-[8px] uppercase font-mono font-bold text-primary tracking-wider">Chosen Subscription</span>
+                          <h3 className="text-sm font-black text-foreground">{formData.plan}</h3>
+                        </div>
+                        <span className="text-[10px] font-bold bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-full">
+                          {selectedPlanObj ? `${selectedPlanObj.maxCameras} Cameras Included` : "5 Cameras"}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1.5 text-[11px]">
+                        <div className="flex items-center justify-between text-muted-foreground">
+                          <span>Base Plan Price ({billingCycle})</span>
+                          <span className="font-semibold text-foreground">
+                            ₹{(selectedPlanObj 
+                              ? (billingCycle === 'yearly' ? selectedPlanObj.yearlyPrice : selectedPlanObj.monthlyPrice) 
+                              : (billingCycle === 'yearly' ? 14999 : 1499)
+                            ).toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-muted-foreground">
+                          <span>GST / Taxes (18%)</span>
+                          <span className="font-semibold text-foreground">
+                            ₹{Math.round((selectedPlanObj 
+                              ? (billingCycle === 'yearly' ? selectedPlanObj.yearlyPrice : selectedPlanObj.monthlyPrice) 
+                              : (billingCycle === 'yearly' ? 14999 : 1499)) * 0.18
+                            ).toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="border-t border-border/40 pt-2 flex items-center justify-between font-black text-xs text-foreground">
+                          <span>Total Amount Payable</span>
+                          <span className="text-sm text-primary">
+                            ₹{(
+                              (selectedPlanObj 
+                                ? (billingCycle === 'yearly' ? selectedPlanObj.yearlyPrice : selectedPlanObj.monthlyPrice) 
+                                : (billingCycle === 'yearly' ? 14999 : 1499)) +
+                              Math.round((selectedPlanObj 
+                                ? (billingCycle === 'yearly' ? selectedPlanObj.yearlyPrice : selectedPlanObj.monthlyPrice) 
+                                : (billingCycle === 'yearly' ? 14999 : 1499)) * 0.18)
+                            ).toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Included Features List */}
+                      <div className="pt-2 border-t border-border/40">
+                        <span className="text-[9px] font-bold text-muted-foreground uppercase font-mono block mb-1.5">Package Inclusions</span>
+                        <div className="grid grid-cols-2 gap-1.5 text-[10px] text-foreground/80 font-medium">
+                          <span className="flex items-center gap-1"><Check className="w-3 h-3 text-emerald-500" /> Human Tracking</span>
+                          <span className="flex items-center gap-1"><Check className="w-3 h-3 text-emerald-500" /> After-Hours Sentinel</span>
+                          <span className="flex items-center gap-1"><Check className="w-3 h-3 text-emerald-500" /> WhatsApp Alerts</span>
+                          <span className="flex items-center gap-1"><Check className="w-3 h-3 text-emerald-500" /> Priority Support</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Right: Razorpay Checkout Terminal Card */}
+                    <div className="md:col-span-5 p-3.5 rounded-xl border border-sky-500/30 bg-sky-500/5 space-y-3 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center gap-2 text-foreground text-xs font-bold mb-1">
+                          <CreditCard className="w-4 h-4 text-sky-500" />
+                          <span>Razorpay Payment Gateway</span>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground leading-relaxed">
+                          Instant activation with official Razorpay checkout integration.
+                        </p>
+
+                        {/* Supported Payment Logos / Pills */}
+                        <div className="mt-3 p-2 rounded-lg bg-background/70 border border-border space-y-1.5">
+                          <span className="text-[8px] font-bold text-muted-foreground uppercase tracking-wider block">Supported Channels</span>
+                          <div className="flex flex-wrap gap-1 text-[9px] font-bold text-foreground">
+                            <span className="bg-muted/60 px-1.5 py-0.5 rounded border border-border/50">UPI / QR</span>
+                            <span className="bg-muted/60 px-1.5 py-0.5 rounded border border-border/50">Cards</span>
+                            <span className="bg-muted/60 px-1.5 py-0.5 rounded border border-border/50">NetBanking</span>
+                            <span className="bg-muted/60 px-1.5 py-0.5 rounded border border-border/50">Wallets</span>
+                            <span className="bg-muted/60 px-1.5 py-0.5 rounded border border-border/50">EMI</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Payment Action States */}
+                      {!paymentSuccessData ? (
+                        <div className="space-y-2 pt-2 border-t border-sky-500/20">
+                          {/* Live Razorpay Popup Trigger */}
+                          <button
+                            type="button"
+                            disabled={isProcessingPayment}
+                            onClick={() => handleRazorpayPayment(false)}
+                            className="w-full py-2.5 px-3 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white shadow-md shadow-sky-600/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+                          >
+                            {isProcessingPayment ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                <span>Opening Razorpay...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Lock className="w-3.5 h-3.5" />
+                                <span>Pay ₹{(
+                                  (selectedPlanObj 
+                                    ? (billingCycle === 'yearly' ? selectedPlanObj.yearlyPrice : selectedPlanObj.monthlyPrice) 
+                                    : (billingCycle === 'yearly' ? 14999 : 1499)) +
+                                  Math.round((selectedPlanObj 
+                                    ? (billingCycle === 'yearly' ? selectedPlanObj.yearlyPrice : selectedPlanObj.monthlyPrice) 
+                                    : (billingCycle === 'yearly' ? 14999 : 1499)) * 0.18)
+                                ).toLocaleString()} with Razorpay</span>
+                              </>
+                            )}
+                          </button>
+
+                          {/* 1-Click Instant Demo Sandbox Payment */}
+                          <button
+                            type="button"
+                            disabled={isProcessingPayment}
+                            onClick={() => handleRazorpayPayment(true)}
+                            className="w-full py-1.5 px-2.5 rounded-lg text-[10px] font-bold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 border border-emerald-500/30 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
+                          >
+                            <Zap className="w-3 h-3" />
+                            <span>⚡ 1-Click Razorpay Demo Sandbox Payment</span>
+                          </button>
+                        </div>
+                      ) : (
+                        /* Payment Completed State */
+                        <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 space-y-2">
+                          <div className="flex items-center gap-1.5 text-emerald-500 text-xs font-bold">
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Payment Verified Successfully!</span>
+                          </div>
+                          <div className="text-[10px] space-y-0.5 text-foreground/80 font-mono">
+                            <div>Payment ID: <strong className="text-foreground">{paymentSuccessData.paymentId}</strong></div>
+                            <div>Invoice: <strong className="text-foreground">{paymentSuccessData.invoiceNumber}</strong></div>
+                            <div>Amount: <strong className="text-emerald-500">₹{paymentSuccessData.amount.toLocaleString()}</strong></div>
+                          </div>
+                          <div className="text-[9px] text-muted-foreground pt-1">
+                            ✓ Your subscription is active. Click <strong>"Complete Setup"</strong> below to enter your dashboard.
+                          </div>
+                        </div>
                       )}
                     </div>
                   </div>

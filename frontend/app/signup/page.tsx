@@ -10,17 +10,17 @@ export default function SignupPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [signupSuccess, setSignupSuccess] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
     companyName: '',
     password: '',
     confirmPassword: '',
-    role: 'user' as 'admin' | 'user' | 'demo',
     agreeTerms: false,
   });
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5050';
 
   useEffect(() => {
     const isDark = document.documentElement.classList.contains('dark');
@@ -59,7 +59,7 @@ export default function SignupPage() {
           name: formData.fullName,
           email: formData.email,
           password: formData.password,
-          role: formData.role,
+          role: 'user',
         }),
       });
 
@@ -67,6 +67,9 @@ export default function SignupPage() {
 
       if (res.ok && data.success) {
         setSignupSuccess(true);
+        if (data.previewUrl) {
+          setPreviewUrl(data.previewUrl);
+        }
       } else {
         setErrorMessage(data.message || 'Registration failed.');
       }
@@ -126,7 +129,7 @@ export default function SignupPage() {
               <span className="text-md font-bold tracking-tight text-foreground">CoreWatch</span>
             </div>
             <h1 className="text-xl font-black tracking-tight text-foreground">Create Account</h1>
-            <p className="text-xs text-muted-foreground">Choose your role and register to access CoreWatch.</p>
+            <p className="text-xs text-muted-foreground">Enter your details to register and access CoreWatch.</p>
           </div>
 
           {errorMessage && (
@@ -164,46 +167,6 @@ export default function SignupPage() {
                   placeholder="name@company.com"
                   className="w-full px-3 py-2 rounded-lg border border-border bg-card text-foreground placeholder:text-muted-foreground/60 text-sm focus:outline-none focus:bg-white dark:focus:bg-zinc-950 focus:border-brand-gold focus:ring-2 focus:ring-brand-gold/20 transition-all duration-200"
                 />
-              </div>
-
-              {/* ROLE SELECTOR (Admin, User, Demo) */}
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide">SELECT ACCOUNT ROLE</label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, role: 'user' })}
-                    className={`py-2 px-1 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
-                      formData.role === 'user'
-                        ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400 ring-2 ring-emerald-500/20'
-                        : 'border-border bg-card/50 text-muted-foreground hover:border-brand-gold-light/40'
-                    }`}
-                  >
-                    🟢 User
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, role: 'demo' })}
-                    className={`py-2 px-1 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
-                      formData.role === 'demo'
-                        ? 'border-brand-gold bg-brand-gold/10 text-brand-gold-light ring-2 ring-brand-gold/20'
-                        : 'border-border bg-card/50 text-muted-foreground hover:border-brand-gold-light/40'
-                    }`}
-                  >
-                    🟡 Demo
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, role: 'admin' })}
-                    className={`py-2 px-1 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
-                      formData.role === 'admin'
-                        ? 'border-red-500 bg-red-500/10 text-red-400 ring-2 ring-red-500/20'
-                        : 'border-border bg-card/50 text-muted-foreground hover:border-brand-gold-light/40'
-                    }`}
-                  >
-                    🔴 Admin
-                  </button>
-                </div>
               </div>
 
               {/* Password inputs */}
@@ -259,14 +222,14 @@ export default function SignupPage() {
                 {isSubmitting ? (
                   <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
                 ) : (
-                  `Register as ${formData.role.toUpperCase()}`
+                  "Create Account"
                 )}
               </button>
 
             </form>
           ) : (
-            <div className="py-8 text-center space-y-5 border border-brand-gold/30 bg-brand-gold/5 rounded-lg p-6 backdrop-blur-xl">
-              <div className="w-16 h-16 rounded-full bg-brand-gold/10 border border-brand-gold/20 text-brand-gold-light flex items-center justify-center mx-auto text-2xl font-bold animate-pulse">
+            <div className="py-6 text-center space-y-4 border border-brand-gold/30 bg-brand-gold/5 rounded-lg p-6 backdrop-blur-xl">
+              <div className="w-14 h-14 rounded-full bg-brand-gold/10 border border-brand-gold/20 text-brand-gold-light flex items-center justify-center mx-auto text-2xl font-bold animate-pulse">
                 ✉
               </div>
               <h2 className="text-xl font-black text-foreground tracking-tight">Verify Your Email</h2>
@@ -274,9 +237,32 @@ export default function SignupPage() {
                 We've sent a verification link to <span className="text-brand-gold-light font-bold">{formData.email}</span>.
               </p>
               <p className="text-[11px] text-muted-foreground leading-relaxed">
-                Please click the link in your email to verify your address and continue your account registration process.
+                Please check your inbox or Ethereal Mail to verify your address and activate your account.
               </p>
-              <div className="pt-2">
+
+              {previewUrl && (
+                <div className="p-3 bg-brand-gold/10 border border-brand-gold/30 rounded-lg text-left">
+                  <p className="text-[11px] font-bold text-brand-gold-light mb-1">📬 Ethereal Test Email Received:</p>
+                  <a 
+                    href={previewUrl} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="text-xs text-brand-gold underline break-all font-mono hover:text-brand-gold-light"
+                  >
+                    Click to Open Ethereal Email Preview ↗
+                  </a>
+                </div>
+              )}
+
+              <div className="pt-2 flex flex-col gap-2">
+                <a 
+                  href="https://ethereal.email/messages" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="w-full py-2.5 px-4 rounded-lg text-xs font-bold bg-muted/60 hover:bg-muted text-foreground border border-border transition-colors text-center"
+                >
+                  Open Ethereal Mailbox (Messages) ↗
+                </a>
                 <Link 
                   href="/login" 
                   className="inline-block py-2.5 px-6 rounded-lg text-xs font-extrabold uppercase tracking-wider bg-brand-brown hover:bg-brand-navy text-[#FAF6EE] transition-colors cursor-pointer"

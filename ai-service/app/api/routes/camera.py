@@ -1,10 +1,36 @@
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from typing import Optional
 import cv2
 import numpy as np
 import time
 
 router = APIRouter()
+
+class CameraConnectRequest(BaseModel):
+    cameraKey: Optional[str] = "CAM-1F8IPF"
+    streamUrl: str
+
+@router.post("/camera/connect")
+def connect_camera(req: CameraConnectRequest):
+    """
+    Connects or dynamically switches camera stream feed to the provided streamUrl.
+    """
+    from app.main import camera_manager
+    camera_key = req.cameraKey or "CAM-1F8IPF"
+    stream_url = req.streamUrl.strip()
+    
+    if not stream_url:
+        return {"success": False, "error": "streamUrl cannot be empty"}
+        
+    camera_manager.register_camera(camera_key, stream_url, force_restart=True)
+    return {
+        "success": True,
+        "message": f"Connected camera '{camera_key}' to stream successfully.",
+        "cameraKey": camera_key,
+        "streamUrl": stream_url
+    }
 
 @router.get("/camera/status")
 def get_camera_status():

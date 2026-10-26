@@ -35,6 +35,11 @@ export interface ICamera extends Document {
   streamType: "IP_WEBCAM" | "RTSP";
   streamUrl?: string;
   status: "ONLINE" | "OFFLINE";
+  humanDetection: boolean;
+  zoneMonitoring: boolean;
+  afterHoursSecurity: boolean;
+  suspiciousMovement: boolean;
+  cameraHealth: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -163,6 +168,26 @@ const CameraSchema = new Schema<ICamera>(
       type: String,
       enum: ["ONLINE", "OFFLINE"],
       default: "ONLINE",
+    },
+    humanDetection: {
+      type: Boolean,
+      default: true,
+    },
+    zoneMonitoring: {
+      type: Boolean,
+      default: true,
+    },
+    afterHoursSecurity: {
+      type: Boolean,
+      default: true,
+    },
+    suspiciousMovement: {
+      type: Boolean,
+      default: true,
+    },
+    cameraHealth: {
+      type: Boolean,
+      default: true,
     },
   },
   {

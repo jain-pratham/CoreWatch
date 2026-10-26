@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from app.config import settings
 from app.utils.logger import setup_logging, get_logger
 from app.camera.stream import CameraStream
+from app.camera.config_manager import CameraConfigManager
 from app.detection.person_detector import PersonDetector, YOLOModelManager
 from app.tracking.track_manager import TrackManager
 from app.zones.zone_manager import ZoneManager
@@ -81,6 +82,7 @@ class CameraRuntime:
 
         # Dispatch engine
         self.event_engine = EventEngine()
+        self.config_manager = CameraConfigManager(self.camera_key)
 
         # Thread states
         self.running = False
@@ -103,8 +105,9 @@ class CameraRuntime:
 
     def start(self):
         self.running = True
-        # Fetch initial zones before launching loop
+        # Fetch initial zones and camera config before launching loop
         self.zone_manager.fetch_zones()
+        self.config_manager.fetch_config()
         self.thread = threading.Thread(target=self._loop, name=f"Runtime-{self.camera_key}", daemon=True)
         self.thread.start()
         logger.info(f"[System] Started camera runtime thread for {self.camera_key}")
@@ -176,11 +179,15 @@ class CameraRuntime:
                 frame = self.stream.read_frame()
                 frame_received = frame is not None
                 now = time.time()
+                
+                # Fetch cached camera config settings (toggles)
+                config = self.config_manager.get_config()
 
                 # 1. Update camera connectivity health (runs on every stream frame)
-                offline_events = self.offline_detector.update(frame_received, now)
-                if len(offline_events) > 0:
-                    self.event_engine.process_events(offline_events, None, [], now)
+                if config.get("cameraHealth", True):
+                    offline_events = self.offline_detector.update(frame_received, now)
+                    if len(offline_events) > 0:
+                        self.event_engine.process_events(offline_events, None, [], now, config)
 
                 if not frame_received:
                     time.sleep(0.01)
@@ -189,9 +196,10 @@ class CameraRuntime:
                 self.last_frame = frame
 
                 # 2. Check for camera visual tampering (runs on every received frame, independent of YOLO)
-                tamper_events = self.tampering_detector.update(frame, now)
-                if len(tamper_events) > 0:
-                    self.event_engine.process_events(tamper_events, frame, [], now)
+                if config.get("cameraHealth", True):
+                    tamper_events = self.tampering_detector.update(frame, now)
+                    if len(tamper_events) > 0:
+                        self.event_engine.process_events(tamper_events, frame, [], now, config)
 
                 # 3. Adaptive Inference Scheduler Check (Fail-Safe protected)
                 should_run_yolo = True
@@ -229,9 +237,15 @@ class CameraRuntime:
 
                     # Determine YOLO scheduling
                     should_run_yolo = self.scheduler.should_run_inference(now, context)
+                    
+                    # Bypass YOLO tracking if humanDetection is disabled
+                    if not config.get("humanDetection", True):
+                        should_run_yolo = False
+                        self.track_manager.tracks.clear()
+                        self.movement_tracker.track_histories.clear()
                 except Exception as e:
                     logger.error(f"[Scheduler] Fail-safe fallback triggered due to exception: {e}", exc_info=True)
-                    should_run_yolo = True
+                    should_run_yolo = config.get("humanDetection", True)
 
                 # 4. YOLO Inference Execution Gate
                 if should_run_yolo:
@@ -244,8 +258,11 @@ class CameraRuntime:
                     enriched_detections = self.track_manager.update_tracks(detections, now)
                     self.active_tracks_count = len(enriched_detections)
 
-                    # Retrieve active zones
-                    zones = self.zone_manager.get_active_zones()
+                    # Retrieve active zones conditionally based on zoneMonitoring config
+                    if config.get("zoneMonitoring", True):
+                        zones = self.zone_manager.get_active_zones()
+                    else:
+                        zones = []
                     h, w = frame.shape[:2]
 
                     # Reset track states
@@ -309,29 +326,30 @@ class CameraRuntime:
 
                     # Evaluate behaviors (pacing)
                     behavior_events = []
-                    for det in enriched_detections:
-                        track_id = det.get("trackId")
-                        if track_id is None:
-                            continue
+                    if config.get("suspiciousMovement", True):
+                        for det in enriched_detections:
+                            track_id = det.get("trackId")
+                            if track_id is None:
+                                continue
 
-                        track_state = self.track_manager.tracks[track_id]
-                        foot_pt = (det["footPoint"]["x"], det["footPoint"]["y"])
-                        first_seen = det.get("firstSeen", now)
+                            track_state = self.track_manager.tracks[track_id]
+                            foot_pt = (det["footPoint"]["x"], det["footPoint"]["y"])
+                            first_seen = det.get("firstSeen", now)
 
-                        metrics = self.movement_tracker.update(track_id, foot_pt, now)
+                            metrics = self.movement_tracker.update(track_id, foot_pt, now)
 
-                        # Check suspicious pacing rule
-                        if self.suspicious_detector.check_suspicious_movement(track_id, metrics):
-                            track_state.has_suspicious_behavior = True
-                            behavior_events.append({
-                                "eventType": "SUSPICIOUS_MOVEMENT_PATTERN",
-                                "cameraId": self.camera_key,
-                                "trackId": track_id,
-                                "timestamp": now,
-                                "bbox": det.get("bbox"),
-                                "zoneId": track_state.current_zone,
-                                "zoneType": track_state.zone_type
-                            })
+                            # Check suspicious pacing rule
+                            if self.suspicious_detector.check_suspicious_movement(track_id, metrics):
+                                track_state.has_suspicious_behavior = True
+                                behavior_events.append({
+                                    "eventType": "SUSPICIOUS_MOVEMENT_PATTERN",
+                                    "cameraId": self.camera_key,
+                                    "trackId": track_id,
+                                    "timestamp": now,
+                                    "bbox": det.get("bbox"),
+                                    "zoneId": track_state.current_zone,
+                                    "zoneType": track_state.zone_type
+                                })
 
                     # Cleanup behavior instances for dead tracks
                     active_tids = {det.get("trackId") for det in enriched_detections if det.get("trackId") is not None}
@@ -363,7 +381,7 @@ class CameraRuntime:
 
                     # Process events in EventEngine
                     if len(all_events) > 0:
-                        self.event_engine.process_events(all_events, frame, zones, now)
+                        self.event_engine.process_events(all_events, frame, zones, now, config)
 
                     # Cache annotated preview frame
                     annotated_frame = frame.copy()
@@ -458,8 +476,12 @@ class CameraRuntime:
             )
             
             # Red circle on feet contact point
-            foot = det["footPoint"]
-            cv2.circle(frame, (foot["x"], foot["y"]), 4, (0, 0, 255), -1)
+            foot = det.get("footPoint")
+            if not foot and "bbox" in det:
+                foot = {"x": int((x1 + x2) / 2), "y": y2}
+            
+            if foot:
+                cv2.circle(frame, (foot["x"], foot["y"]), 4, (0, 0, 255), -1)
 
 
 class CameraManager:
@@ -476,14 +498,20 @@ class CameraManager:
             # Singleton model initialized once
             self.detector = PersonDetector()
 
-    def register_camera(self, camera_key: str, camera_url: str):
+    def register_camera(self, camera_key: str, camera_url: str, force_restart: bool = False):
         with self._lock:
             if not self.detector:
                 self.detector = PersonDetector()
             
             if camera_key in self.runtimes:
-                logger.warning(f"[System] Camera {camera_key} is already registered. Skipping.")
-                return
+                if force_restart or self.runtimes[camera_key].camera_url != camera_url:
+                    logger.info(f"[System] Reconnecting camera '{camera_key}' to new stream URL: {camera_url}")
+                    old_runtime = self.runtimes[camera_key]
+                    old_runtime.stop()
+                    del self.runtimes[camera_key]
+                else:
+                    logger.warning(f"[System] Camera {camera_key} is already registered with identical URL. Skipping.")
+                    return
             
             runtime = CameraRuntime(camera_key, camera_url, self.detector)
             self.runtimes[camera_key] = runtime

@@ -8,10 +8,11 @@ import { AuthenticatedRequest } from "../middleware/authMiddleware";
 // Helper to send professional update password/welcome email
 const sendWelcomeEmail = async (email: string, name: string, token: string): Promise<boolean> => {
   try {
-    const host = process.env.EMAIL_HOST || "smtp.gmail.com";
-    const port = Number(process.env.EMAIL_PORT) || 465;
-    const user = process.env.EMAIL_USER;
-    const pass = process.env.EMAIL_PASS;
+    const host = process.env.SMTP_HOST || process.env.EMAIL_HOST || "smtp.ethereal.email";
+    const port = Number(process.env.SMTP_PORT || process.env.EMAIL_PORT) || 587;
+    const user = process.env.SMTP_USER || process.env.EMAIL_USER;
+    const pass = process.env.SMTP_PASS || process.env.EMAIL_PASS;
+    const fromEmail = process.env.EMAIL_FROM || user || "support@corewatch.ai";
 
     if (!user || !pass) {
       console.warn("SMTP credentials not configured. Email will not be sent.");
@@ -156,7 +157,7 @@ const sendWelcomeEmail = async (email: string, name: string, token: string): Pro
     `;
 
     const mailOptions = {
-      from: `"CoreWatch System Admin" <${user}>`,
+      from: `"CoreWatch System Admin" <${fromEmail}>`,
       to: email,
       subject: "Action Required: Setup Password for CoreWatch Account",
       html: htmlContent,
@@ -164,6 +165,10 @@ const sendWelcomeEmail = async (email: string, name: string, token: string): Pro
 
     const info = await transporter.sendMail(mailOptions);
     console.log(`Professional welcome/password email sent to ${email}. Message ID: ${info.messageId}`);
+    const previewUrl = nodemailer.getTestMessageUrl(info);
+    if (previewUrl) {
+      console.log(`📬 Ethereal Email Preview URL: ${previewUrl}`);
+    }
     return true;
   } catch (error) {
     console.error("Failed to send SMTP email:", error);

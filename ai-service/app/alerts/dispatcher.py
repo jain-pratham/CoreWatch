@@ -23,40 +23,48 @@ class AlertDispatcher:
         self._last_alert_times = {}
         self._lock = threading.Lock()
 
-    def can_trigger_alert(self, camera_key: str, current_time: float) -> bool:
+    def can_trigger_alert(self, alert_key: str, current_time: float = None) -> bool:
         """
-        Validates if the camera key is outside the cooldown window.
+        Validates if the alert key is outside the cooldown window.
         """
+        if current_time is None:
+            current_time = time.time()
         with self._lock:
-            last_time = self._last_alert_times.get(camera_key, 0.0)
+            last_time = self._last_alert_times.get(alert_key, 0.0)
             if current_time - last_time >= self.cooldown_seconds:
-                self._last_alert_times[camera_key] = current_time
+                self._last_alert_times[alert_key] = current_time
                 return True
             return False
 
-    def dispatch_alert(self, frame, camera_key: str, message: str = "Human detected in shop!"):
+    def dispatch_alert(self, frame, camera_key: str, message: str = "Human detected in shop!", category: str = "HUMAN_DETECTION", event_type: str = "", reason: str = "", zone_name: str = ""):
         """
         Launches the asynchronous alert dispatch worker in a background thread.
         Creates a copy of the frame if it exists to prevent concurrent mutation.
         """
+        # Suppress duplicate alerts for the same camera, category, and zone within cooldown window
+        alert_key = f"{camera_key}:{category}:{zone_name}"
+        if not self.can_trigger_alert(alert_key):
+            logger.info(f"[Alert] Cooldown active for {alert_key}. Suppressing repeat dispatch.")
+            return
+
         frame_copy = frame.copy() if frame is not None else None
         
         # Run the upload and POST request in a background thread to prevent UI freezing
         worker_thread = threading.Thread(
             target=self._dispatch_worker,
-            args=(frame_copy, camera_key, message),
+            args=(frame_copy, camera_key, message, category, event_type, reason, zone_name),
             daemon=True
         )
         worker_thread.start()
 
-    def _dispatch_worker(self, frame, camera_key: str, message: str):
+    def _dispatch_worker(self, frame, camera_key: str, message: str, category: str = "HUMAN_DETECTION", event_type: str = "", reason: str = "", zone_name: str = ""):
         """
         Saves snapshot, uploads to ImgBB, and posts threat metadata to the backend API.
         """
         if frame is None:
             # Skip image upload and dispatch metadata alert directly
             logger.info(f"[Alert] No frame provided. Dispatching text alert for camera {camera_key}...")
-            self._send_payload(camera_key, "", message)
+            self._send_payload(camera_key, "", message, category, event_type, reason, zone_name)
             return
 
         temp_filename = f"detection_{camera_key}.jpg"
@@ -72,12 +80,12 @@ class AlertDispatcher:
             image_url = upload_to_imgbb(temp_filename)
 
             # Send payload to Next.js server
-            self._send_payload(camera_key, image_url, message)
+            self._send_payload(camera_key, image_url, message, category, event_type, reason, zone_name)
             
         except Exception as e:
             logger.error(f"[Alert] Error during background alert dispatch: {e}")
 
-    def _send_payload(self, camera_key: str, image_url: str, message: str):
+    def _send_payload(self, camera_key: str, image_url: str, message: str, category: str = "HUMAN_DETECTION", event_type: str = "", reason: str = "", zone_name: str = ""):
         """
         Helper method to perform HTTP POST to the Next.js API server.
         """
@@ -85,12 +93,16 @@ class AlertDispatcher:
             "cameraKey": camera_key,
             "timestamp": datetime.utcnow().isoformat() + "Z",  # ISO 8601 UTC string
             "imageUrl": image_url or "",
-            "message": message
+            "message": message,
+            "category": category,
+            "eventType": event_type,
+            "reason": reason,
+            "zoneName": zone_name
         }
 
         try:
             headers = {"Content-Type": "application/json"}
-            logger.info(f"[Alert] Posting alert payload to Next.js endpoint: {self.api_url}...")
+            logger.info(f"[Alert] Posting alert payload ({category}) to Next.js endpoint: {self.api_url}...")
             
             response = requests.post(self.api_url, data=json.dumps(payload), headers=headers, timeout=5)
             logger.info(f"[Alert] Server responded: HTTP {response.status_code} - {response.text}")

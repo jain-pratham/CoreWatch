@@ -1,9 +1,18 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Sidebar, { NavItem } from '../../components/layout/Sidebar';
-import { LayoutDashboard, Users, UserPlus, Settings, CreditCard, Video, History, UserCircle, Bell, Eye, ArrowUpCircle, Map, Info } from 'lucide-react';
+import { 
+  LayoutDashboard, Users, UserPlus, Settings, CreditCard, Video, Camera, History, 
+  UserCircle, Bell, Eye, EyeOff, ArrowUpCircle, Map, Info, CheckCircle, AlertCircle, 
+  Loader2, PlusCircle, Trash2, Search, ExternalLink, Copy, Check, Filter, Play, X,
+  ShieldCheck, ShieldAlert, Activity, Sliders, Lock, Calendar, Zap, CheckCircle2, 
+  Shield, HardDrive, Sparkles, TrendingUp, Clock, ArrowRight, FileText, Building, 
+  Layers, Receipt, RefreshCw
+} from 'lucide-react';
+import { securityAudio } from '@/lib/securityAudio';
+import { nativeNotifier } from '@/lib/nativeNotifier';
 
 interface UserData {
   _id: string;
@@ -49,10 +58,17 @@ const NAVIGATION_ITEMS: NavItem[] = [
   { label: 'My Account', href: '/dashboard?tab=admin_profile', icon: UserCircle, roles: ['admin'] },
   { label: 'Help & Guidelines', href: '/dashboard?tab=help_guidelines', icon: Info, roles: ['admin'] },
   { label: 'Live Camera', href: '/dashboard?tab=live_camera', icon: Video, roles: ['user'] },
+  { label: 'Camera Hub', href: '/dashboard?tab=all_cameras', icon: Camera, roles: ['user'], children: [
+    { label: 'All Cameras', href: '/dashboard?tab=all_cameras', icon: Video },
+    { label: 'Add Camera', href: '/dashboard?tab=add_camera', icon: PlusCircle }
+  ]},
   { label: 'Security Zones', href: '/dashboard?tab=zones', icon: Map, roles: ['user'], children: [
     { label: 'Configure Zones', href: '/dashboard?tab=zones', icon: Map }
   ]},
-  { label: 'Subscription Detail', href: '/dashboard?tab=subscription_detail', icon: CreditCard, roles: ['user'] },
+  { label: 'Billing', href: '/dashboard?tab=invoices', icon: CreditCard, roles: ['user'], children: [
+    { label: 'Invoices', href: '/dashboard?tab=invoices' },
+    { label: 'Subscription & Plan', href: '/dashboard?tab=subscription_detail' }
+  ]},
   { label: 'Event History', href: '/dashboard?tab=event_history', icon: History, roles: ['user'] },
   { label: 'Profile', href: '/dashboard?tab=profile', icon: UserCircle, roles: ['user'] },
   { label: 'Notification', href: '/dashboard?tab=notification', icon: Bell, roles: ['user'] },
@@ -64,6 +80,7 @@ const NAVIGATION_ITEMS: NavItem[] = [
 import { Suspense } from 'react';
 import ZoneManagementView from '../../components/zones/ZoneManagementView';
 import PlansManagementView from '../../components/billing/PlansManagementView';
+import UserDashboardContainer from '../../components/user-dashboard/UserDashboardContainer';
 
 function DashboardContent() {
   const router = useRouter();
@@ -84,6 +101,7 @@ function DashboardContent() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [previewUserMode, setPreviewUserMode] = useState(false);
 
   // Escape key press handler for mobile menu drawer
   useEffect(() => {
@@ -99,8 +117,234 @@ function DashboardContent() {
   // Next.js MongoDB multi-tenant camera & alert state
   const [cameras, setCameras] = useState<any[]>([]);
   const [dbAlerts, setDbAlerts] = useState<any[]>([]);
+  const [dbInvoices, setDbInvoices] = useState<any[]>([]);
+  const [dbPlans, setDbPlans] = useState<any[]>([]);
+  const [loadingInvoices, setLoadingInvoices] = useState(true);
   const [activeCameraKey, setActiveCameraKey] = useState<string>('');
+  const [customer, setCustomer] = useState<any>(null);
   const [copySuccess, setCopySuccess] = useState(false);
+  const [camName, setCamName] = useState('');
+  const [camIp, setCamIp] = useState('');
+  const [camPort, setCamPort] = useState('554');
+  const [camUsername, setCamUsername] = useState('');
+  const [camPassword, setCamPassword] = useState('');
+  const [camRtsp, setCamRtsp] = useState('');
+  const [camMfg, setCamMfg] = useState('Hikvision');
+  const [camModel, setCamModel] = useState('');
+  const [camLocation, setCamLocation] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Trial User and Camera Quota Helpers (Test user has unlimited quota and zero locks)
+  const isTestUser = user?.email === 'test@gmail.com';
+  const isTrialUser = !isTestUser && user?.role !== 'admin' && (
+    customer?.plan === 'Demo Free' ||
+    (customer?.cameras === 1 && (customer?.plan?.toLowerCase().includes('demo') || customer?.plan?.toLowerCase().includes('free')))
+  );
+  const maxAllowedCameras = isTestUser ? 9999 : (customer?.cameras || (isTrialUser ? 1 : 5));
+  const isCameraLimitReached = isTestUser ? false : (cameras.length >= maxAllowedCameras);
+
+  // Filter navigation items for trial users who already have their camera configured
+  const computedNavItems = useMemo(() => {
+    return NAVIGATION_ITEMS.map((item) => {
+      if (item.label === 'Camera Hub') {
+        if (isTrialUser && (cameras.length >= 1 || isCameraLimitReached)) {
+          return {
+            ...item,
+            children: [
+              { label: 'All Cameras', href: '/dashboard?tab=all_cameras', icon: Video },
+              { label: 'Upgrade Plan', href: '/dashboard?tab=subscription_detail', icon: ArrowUpCircle }
+            ]
+          };
+        }
+      }
+      return item;
+    });
+  }, [isTrialUser, cameras.length, isCameraLimitReached]);
+
+  // Camera Directory Filter, Search and Action state
+  const [cameraSearchQuery, setCameraSearchQuery] = useState('');
+  const [cameraMfgFilter, setCameraMfgFilter] = useState('ALL');
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // Camera Modal States (View & Settings)
+  const [selectedViewCamera, setSelectedViewCamera] = useState<any | null>(null);
+  const [selectedSettingsCamera, setSelectedSettingsCamera] = useState<any | null>(null);
+  const [settingsTab, setSettingsTab] = useState<'ai' | 'device'>('ai');
+  const [isSavingDeviceSettings, setIsSavingDeviceSettings] = useState(false);
+  const [settingsSuccessMsg, setSettingsSuccessMsg] = useState<string | null>(null);
+  const [settingsErrorMsg, setSettingsErrorMsg] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    locationName: '',
+    ipAddress: '',
+    port: '554',
+    username: '',
+    password: '',
+    rtspUrl: '',
+    manufacturer: 'Hikvision',
+    cameraModel: '',
+  });
+
+  const openViewModal = (cam: any) => {
+    setSelectedViewCamera(cam);
+  };
+
+  const openSettingsModal = (cam: any) => {
+    setSelectedSettingsCamera(cam);
+    setSettingsTab('ai');
+    setSettingsSuccessMsg(null);
+    setSettingsErrorMsg(null);
+    setEditForm({
+      name: cam.name || '',
+      locationName: cam.locationName || '',
+      ipAddress: cam.ipAddress || '',
+      port: cam.port ? String(cam.port) : '554',
+      username: cam.username || '',
+      password: '',
+      rtspUrl: cam.rtspUrl || '',
+      manufacturer: cam.manufacturer || 'Hikvision',
+      cameraModel: cam.cameraModel || '',
+    });
+  };
+
+  const handleToggleModalFeature = async (featureName: string, currentValue: boolean) => {
+    if (!selectedSettingsCamera) return;
+    try {
+      const updatedValue = !currentValue;
+      const res = await fetch('/api/cameras', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user?.token}`
+        },
+        body: JSON.stringify({
+          cameraKey: selectedSettingsCamera.cameraKey,
+          [featureName]: updatedValue
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setCameras(cameras.map(c => c.cameraKey === selectedSettingsCamera.cameraKey ? data.data : c));
+        setSelectedSettingsCamera(data.data);
+      }
+    } catch (err) {
+      console.error("Failed to toggle feature:", err);
+      alert("Failed to update feature settings.");
+    }
+  };
+
+  const handleSaveDeviceSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedSettingsCamera) return;
+    setIsSavingDeviceSettings(true);
+    setSettingsSuccessMsg(null);
+    setSettingsErrorMsg(null);
+
+    try {
+      const payload: any = {
+        cameraKey: selectedSettingsCamera.cameraKey,
+        name: editForm.name.trim(),
+        locationName: editForm.locationName.trim() || editForm.name.trim(),
+        ipAddress: editForm.ipAddress.trim(),
+        port: parseInt(editForm.port, 10) || 554,
+        username: editForm.username.trim(),
+        rtspUrl: editForm.rtspUrl.trim(),
+        manufacturer: editForm.manufacturer,
+        cameraModel: editForm.cameraModel.trim(),
+      };
+      if (editForm.password.trim()) {
+        payload.password = editForm.password.trim();
+      }
+
+      const res = await fetch('/api/cameras', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user?.token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setCameras(cameras.map(c => c.cameraKey === selectedSettingsCamera.cameraKey ? data.data : c));
+        setSelectedSettingsCamera(data.data);
+        setSettingsSuccessMsg("✓ Camera configuration updated successfully!");
+        setTimeout(() => setSettingsSuccessMsg(null), 3000);
+      } else {
+        setSettingsErrorMsg(data.error || "Failed to update camera parameters.");
+      }
+    } catch (err) {
+      setSettingsErrorMsg("An unexpected error occurred while saving device settings.");
+    } finally {
+      setIsSavingDeviceSettings(false);
+    }
+  };
+
+  const filteredCameras = cameras.filter((cam) => {
+    const query = cameraSearchQuery.toLowerCase().trim();
+    const matchesSearch =
+      !query ||
+      (cam.name?.toLowerCase() || '').includes(query) ||
+      (cam.cameraKey?.toLowerCase() || '').includes(query) ||
+      (cam.locationName?.toLowerCase() || '').includes(query) ||
+      (cam.ipAddress?.toLowerCase() || '').includes(query);
+    const matchesMfg = cameraMfgFilter === 'ALL' || (cam.manufacturer || 'Hikvision') === cameraMfgFilter;
+    return matchesSearch && matchesMfg;
+  });
+
+  const handleDeleteCamera = async (cameraKeyToDelete: string) => {
+    if (!confirm(`Are you sure you want to remove camera ${cameraKeyToDelete}?`)) return;
+    try {
+      const res = await fetch(`/api/cameras?cameraKey=${cameraKeyToDelete}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${user?.token}`,
+        },
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCameras((prev) => prev.filter((c) => c.cameraKey !== cameraKeyToDelete));
+        if (activeCameraKey === cameraKeyToDelete) {
+          const remaining = cameras.filter((c) => c.cameraKey !== cameraKeyToDelete);
+          setActiveCameraKey(remaining.length > 0 ? remaining[0].cameraKey : '');
+        }
+      } else {
+        alert(data.error || 'Failed to delete camera.');
+      }
+    } catch (err) {
+      alert('Failed to delete camera.');
+    }
+  };
+
+  const activeCamera = cameras.find((c) => c.cameraKey === activeCameraKey);
+
+  const toggleCameraFeature = async (featureName: string, currentValue: boolean) => {
+    if (!activeCameraKey) return;
+    try {
+      const updatedValue = !currentValue;
+      const res = await fetch('/api/cameras', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user?.token}`
+        },
+        body: JSON.stringify({
+          cameraKey: activeCameraKey,
+          [featureName]: updatedValue
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setCameras(cameras.map(c => c.cameraKey === activeCameraKey ? data.data : c));
+      }
+    } catch (err) {
+      console.error("Failed to toggle feature:", err);
+      alert("Failed to update feature settings.");
+    }
+  };
   const [openSubmenus, setOpenSubmenus] = useState<Record<string, boolean>>({
     customers: true,
   });
@@ -181,16 +425,27 @@ function DashboardContent() {
               })
                 .then((cRes) => cRes.json())
                 .then((cData) => {
-                  if (cData.success && cData.data && cData.data.status === 'Active') {
-                    // Allowed to enter dashboard
+                  if (cData.success && cData.data) {
+                    setCustomer(cData.data);
+                    if (cData.data.status === 'Active' || freshUser.email === 'test@gmail.com') {
+                      // Allowed to enter dashboard
+                      setLoading(false);
+                    } else {
+                      // Pending status: redirect to wizard
+                      router.push('/signup-steps');
+                    }
+                  } else if (freshUser.email === 'test@gmail.com') {
                     setLoading(false);
                   } else {
-                    // Pending status or no customer profile: redirect to wizard
                     router.push('/signup-steps');
                   }
                 })
                 .catch(() => {
-                  router.push('/signup-steps');
+                  if (freshUser.email === 'test@gmail.com') {
+                    setLoading(false);
+                  } else {
+                    router.push('/signup-steps');
+                  }
                 });
             } else {
               setLoading(false);
@@ -297,13 +552,120 @@ function DashboardContent() {
       }
     };
 
+    const loadInvoices = async () => {
+      try {
+        setLoadingInvoices(true);
+        const res = await fetch(`${API_URL}/api/invoices`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (data.success && data.data) {
+          const list = Array.isArray(data.data) ? data.data : (Array.isArray(data.data.invoices) ? data.data.invoices : []);
+          setDbInvoices(list);
+        }
+      } catch (err) {
+        console.log("Failed to load invoices from DB:", err);
+      } finally {
+        setLoadingInvoices(false);
+      }
+    };
+
+    const loadPlans = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/plans`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (data.success && data.data) {
+          const list = Array.isArray(data.data) ? data.data : (Array.isArray(data.data.plans) ? data.data.plans : []);
+          setDbPlans(list);
+        }
+      } catch (err) {
+        console.log("Failed to load plans from DB:", err);
+      }
+    };
+
     loadCameras();
     loadAlerts();
     loadCustomers();
+    loadInvoices();
+    loadPlans();
 
-    // Poll Next.js Alerts API every 3 seconds
-    const interval = setInterval(loadAlerts, 3000);
-    return () => clearInterval(interval);
+    // Real-Time Server-Sent Events (SSE) for instant alert push with ZERO polling overhead
+    let eventSource: EventSource | null = null;
+    try {
+      eventSource = new EventSource(`/api/alerts/events?token=${token}`);
+      
+      eventSource.addEventListener('alert', (e) => {
+        try {
+          const payload = JSON.parse(e.data);
+          if (!payload) return;
+
+          // 1. Handle Real-Time Incident Status Updates (Acknowledge / Resolve)
+          if (payload.isUpdate && payload.alertId) {
+            setDbAlerts((prev) =>
+              prev.map((a) =>
+                a._id === payload.alertId
+                  ? { ...a, ...(payload.updatedDoc || {}), status: payload.status, resolutionNotes: payload.resolutionNotes }
+                  : a
+              )
+            );
+            if (payload.status === 'ACKNOWLEDGED' || payload.status === 'RESOLVED') {
+              securityAudio.stopCriticalAlarm(payload.alertId);
+            }
+            return;
+          }
+
+          // 2. Handle New Security Incident
+          const newAlert = payload;
+          if (newAlert && (newAlert._id || newAlert.cameraKey)) {
+            setDbAlerts((prev) => {
+              if (prev.some((a) => a._id === newAlert._id)) return prev;
+              return [newAlert, ...prev];
+            });
+
+            // Play professional security alarm based on incident severity
+            const severity = newAlert.severity || 'HIGH';
+            securityAudio.playAlarm(severity, newAlert._id);
+
+            // Dispatch native operating system notification where permitted
+            nativeNotifier.sendNotification(
+              {
+                id: newAlert._id,
+                cameraKey: newAlert.cameraKey,
+                cameraName: newAlert.cameraName,
+                severity: newAlert.severity || 'HIGH',
+                category: newAlert.category,
+                message: newAlert.message,
+                reason: newAlert.reason || newAlert.description,
+                timestamp: newAlert.timestamp,
+                zoneName: newAlert.zoneName,
+              },
+              () => {
+                if (newAlert.cameraKey) {
+                  setActiveCameraKey(newAlert.cameraKey);
+                  setActiveTab('live_camera');
+                }
+              }
+            );
+          }
+        } catch (parseErr) {
+          console.error("SSE security alert parse error:", parseErr);
+        }
+      });
+
+      eventSource.onerror = () => {
+        // EventSource automatically handles reconnecting in the background
+      };
+    } catch (sseErr) {
+      console.warn("SSE connection error:", sseErr);
+    }
+
+    return () => {
+      if (eventSource) {
+        eventSource.close();
+      }
+    };
 
   }, [user]);
 
@@ -539,9 +901,26 @@ function DashboardContent() {
     user: [
       { id: 'dashboard', label: 'Dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
       { id: 'live_camera', label: 'Live Camera', icon: 'M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z' },
+      {
+        id: 'camera_hub',
+        label: 'Camera Hub',
+        icon: 'M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z',
+        subItems: [
+          { id: 'all_cameras', label: 'All Cameras', icon: 'M4 6h16M4 12h16M4 18h16' },
+          { id: 'add_camera', label: 'Add Camera', icon: 'M12 4v16m8-8H4' }
+        ]
+      },
       { id: 'zones', label: 'Security Zones', icon: 'M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7' },
       { id: 'settings', label: 'Settings', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z' },
-      { id: 'subscription_detail', label: 'Subscription Detail', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
+      {
+        id: 'billing',
+        label: 'Billing',
+        icon: 'M3 10h18M7 15h1m4 0h1m-7 4h12a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z',
+        subItems: [
+          { id: 'invoices', label: 'Invoices', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
+          { id: 'subscription_detail', label: 'Subscription & Plan', icon: 'M3 10h18M7 15h1m4 0h1m-7 4h12a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' }
+        ]
+      },
       { id: 'event_history', label: 'Event History', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
       { id: 'profile', label: 'Profile', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
       { id: 'notification', label: 'Notification', icon: 'M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9' },
@@ -565,6 +944,178 @@ function DashboardContent() {
 
   const avatarInitials = user?.name ? user.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'CW';
 
+  const handleTestConnection = async () => {
+    if (!camIp || !camPort || !camUsername || !camPassword || !camRtsp) {
+      alert("Please enter all required camera details.");
+      return;
+    }
+    setIsTesting(true);
+    setConnectionStatus(null);
+    try {
+      const res = await fetch('/api/cameras/test-connection', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user?.token}`
+        },
+        body: JSON.stringify({
+          ipAddress: camIp.trim(),
+          port: camPort.trim(),
+          username: camUsername.trim(),
+          password: camPassword.trim(),
+          rtspUrl: camRtsp.trim()
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setConnectionStatus({ success: true, message: "✓ Camera connected successfully" });
+      } else {
+        setConnectionStatus({
+          success: false,
+          message: data.error || "Unable to connect to camera. Please verify the IP address, port, credentials, and RTSP URL."
+        });
+      }
+    } catch (err) {
+      setConnectionStatus({
+        success: false,
+        message: "Unable to connect to the camera. Please verify the connection details."
+      });
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  const handleAddCameraSubmitInternal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!camName || !camIp || !camPort || !camUsername || !camPassword || !camRtsp) {
+      alert("Please enter all required camera details.");
+      return;
+    }
+    if (cameras.length >= (customer?.cameras || 5)) {
+      alert(`Camera limit reached. Your current subscription allows up to ${customer?.cameras || 5} cameras.`);
+      return;
+    }
+
+    setIsAdding(true);
+    try {
+      const res = await fetch('/api/cameras', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user?.token}`
+        },
+        body: JSON.stringify({
+          name: camName.trim(),
+          ipAddress: camIp.trim(),
+          port: camPort.trim(),
+          username: camUsername.trim(),
+          password: camPassword.trim(),
+          rtspUrl: camRtsp.trim(),
+          manufacturer: camMfg,
+          cameraModel: camModel.trim(),
+          locationName: camLocation.trim() || camName.trim()
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setCameras([data.data, ...cameras]);
+        setActiveCameraKey(data.data.cameraKey);
+        setCamName('');
+        setCamIp('');
+        setCamPort('554');
+        setCamUsername('');
+        setCamPassword('');
+        setCamRtsp('');
+        setCamMfg('Hikvision');
+        setCamModel('');
+        setCamLocation('');
+        setConnectionStatus(null);
+        alert("Camera registered successfully!");
+      } else {
+        alert(data.error || "Failed to add camera.");
+      }
+    } catch (err) {
+      alert("An unexpected error occurred while adding the camera.");
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
+  const isUserMode: boolean = (currentRole as any) !== 'admin' || previewUserMode;
+  if (isUserMode) {
+    return (
+      <div className="relative">
+        {currentRole === 'admin' && (
+          <div className="bg-orange-600 text-white text-xs font-bold py-1 px-4 flex items-center justify-between sticky top-0 z-[60]">
+            <span>Admin Preview Mode (Viewing User Dashboard UI)</span>
+            <button
+              onClick={() => setPreviewUserMode(false)}
+              className="bg-black/30 hover:bg-black/50 px-2.5 py-0.5 rounded text-[11px] cursor-pointer"
+            >
+              Exit Preview & Return to Admin View
+            </button>
+          </div>
+        )}
+        <UserDashboardContainer
+          user={user}
+          customer={customer}
+          cameras={cameras}
+          setCameras={setCameras}
+          dbAlerts={dbAlerts}
+          setDbAlerts={setDbAlerts}
+          dbInvoices={dbInvoices}
+          activeCameraKey={activeCameraKey}
+          setActiveCameraKey={setActiveCameraKey}
+          isTrialUser={isTrialUser}
+          maxAllowedCameras={maxAllowedCameras}
+          isCameraLimitReached={isCameraLimitReached}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          onLogout={() => { localStorage.clear(); router.push('/login'); }}
+          openViewModal={openViewModal}
+          openSettingsModal={openSettingsModal}
+          handleDeleteCamera={handleDeleteCamera}
+          selectedViewCamera={selectedViewCamera}
+          setSelectedViewCamera={setSelectedViewCamera}
+          selectedSettingsCamera={selectedSettingsCamera}
+          setSelectedSettingsCamera={setSelectedSettingsCamera}
+          settingsTab={settingsTab}
+          setSettingsTab={setSettingsTab}
+          handleToggleModalFeature={handleToggleModalFeature}
+          editForm={editForm}
+          setEditForm={setEditForm}
+          handleSaveDeviceSettings={handleSaveDeviceSettings}
+          isSavingDeviceSettings={isSavingDeviceSettings}
+          settingsSuccessMsg={settingsSuccessMsg}
+          settingsErrorMsg={settingsErrorMsg}
+          showPassword={showPassword}
+          setShowPassword={setShowPassword}
+          camName={camName}
+          setCamName={setCamName}
+          camIp={camIp}
+          setCamIp={setCamIp}
+          camPort={camPort}
+          setCamPort={setCamPort}
+          camUsername={camUsername}
+          setCamUsername={setCamUsername}
+          camPassword={camPassword}
+          setCamPassword={setCamPassword}
+          camRtsp={camRtsp}
+          setCamRtsp={setCamRtsp}
+          camMfg={camMfg}
+          setCamMfg={setCamMfg}
+          camLocation={camLocation}
+          setCamLocation={setCamLocation}
+          isTesting={isTesting}
+          isAdding={isAdding}
+          connectionStatus={connectionStatus}
+          testCameraConnection={handleTestConnection}
+          handleAddCameraSubmit={handleAddCameraSubmitInternal}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className={`h-screen overflow-hidden flex font-sans bg-background text-foreground transition-colors duration-200 ${theme === 'dark' ? 'dark' : ''}`}>
       
@@ -577,7 +1128,7 @@ function DashboardContent() {
       )}
 
       <Sidebar
-        items={NAVIGATION_ITEMS}
+        items={computedNavItems}
         user={{ firstName: user?.name, email: user?.email, role: currentRole }}
         logoIcon={LayoutDashboard}
         logoTitle="COREWATCH"
@@ -613,6 +1164,16 @@ function DashboardContent() {
           </div>
 
           <div className="flex items-center gap-4 relative">
+            {/* Admin toggle to preview User Dashboard */}
+            <button
+              onClick={() => setPreviewUserMode(true)}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-orange-500/15 text-orange-400 border border-orange-500/30 hover:bg-orange-500/25 transition-colors cursor-pointer"
+              title="Preview the new User Dashboard UI"
+            >
+              <span>Preview User UI</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </button>
+
             {/* Theme Toggle (Light / Dark Switch) */}
             <div className="flex items-center gap-2">
               <button
@@ -1372,11 +1933,45 @@ function DashboardContent() {
             <>
               {activeTab === 'dashboard' && (
                 <div className="space-y-6">
+                  {/* Trial User Status Notification Banner */}
+                  {isTrialUser && (
+                    <div className="p-4 rounded-2xl border border-amber-500/30 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-500 flex items-center justify-center shrink-0 border border-amber-500/30">
+                          <Zap className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-foreground flex items-center gap-2">
+                            <span>Free Trial Plan Active (Demo Free)</span>
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-bold">
+                              {cameras.length}/{maxAllowedCameras} Camera Connected
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">
+                            Your trial account includes 1 camera node configured during signup. Adding more cameras requires upgrading your subscription.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setActiveTab('subscription_detail');
+                          router.push('/dashboard?tab=subscription_detail');
+                        }}
+                        className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs transition-all cursor-pointer shrink-0 shadow-sm flex items-center gap-1.5"
+                      >
+                        <ArrowUpCircle className="w-3.5 h-3.5" />
+                        <span>Upgrade Plan</span>
+                      </button>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div className="p-5 rounded-2xl border border-border bg-card shadow-sm space-y-2">
                       <div className="text-xs text-muted-foreground">Active Cameras</div>
                       <div className="text-3xl font-black text-brand-blue dark:text-brand-light-blue">{cameras.length} Feeds</div>
-                      <div className="text-[11px] text-muted-foreground">100% Active stream</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {isTrialUser ? '1/1 Trial Node Connected' : '100% Active stream'}
+                      </div>
                     </div>
                     <div className="p-5 rounded-2xl border border-border bg-card shadow-sm space-y-2">
                       <div className="text-xs text-muted-foreground">Today's Safety Violations</div>
@@ -1385,8 +1980,12 @@ function DashboardContent() {
                     </div>
                     <div className="p-5 rounded-2xl border border-border bg-card shadow-sm space-y-2">
                       <div className="text-xs text-muted-foreground">Account Subscription</div>
-                      <div className="text-xl font-black text-foreground uppercase">{user?.role === 'admin' ? 'Enterprise Max' : 'Enterprise Pro'}</div>
-                      <div className="text-[11px] text-brand-blue dark:text-brand-light-blue font-semibold">Active · Renews next month</div>
+                      <div className="text-xl font-black text-foreground uppercase">
+                        {isTrialUser ? 'Demo Free (Trial)' : (customer?.plan || (user?.role === 'admin' ? 'Enterprise Max' : 'Enterprise Pro'))}
+                      </div>
+                      <div className="text-[11px] text-brand-blue dark:text-brand-light-blue font-semibold">
+                        {isTrialUser ? '14-Day Free Evaluation · 1 Node' : 'Active · Renews next month'}
+                      </div>
                     </div>
 
                     {/* Camera Key Card (Main Dashboard View) */}
@@ -1520,6 +2119,694 @@ function DashboardContent() {
                 </div>
               )}
 
+              {(activeTab === 'all_cameras' || activeTab === 'camera_hub') && (
+                <div className="space-y-6">
+                  {/* Top Quota / Stats Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="p-5 rounded-2xl border border-border bg-card shadow-sm space-y-2">
+                      <div className="text-xs text-muted-foreground font-medium">Registered Cameras</div>
+                      <div className="text-3xl font-black text-foreground">{cameras.length} Nodes</div>
+                      <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">Active CCTV connections</div>
+                    </div>
+                    <div className="p-5 rounded-2xl border border-border bg-card shadow-sm space-y-2">
+                      <div className="text-xs text-muted-foreground font-medium">Subscription Quota</div>
+                      <div className="text-3xl font-black text-brand-blue dark:text-brand-light-blue">
+                        {cameras.length} / {maxAllowedCameras}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {isTrialUser && isCameraLimitReached ? (
+                          <span className="text-amber-500 font-semibold">Trial limit reached (1/1 camera configured)</span>
+                        ) : (
+                          `${Math.max(0, maxAllowedCameras - cameras.length)} license slots available`
+                        )}
+                      </div>
+                    </div>
+                    <div className="p-5 rounded-2xl border border-border bg-card shadow-sm space-y-2">
+                      <div className="text-xs text-muted-foreground font-medium">AI Stream Health</div>
+                      <div className="text-xl font-black text-emerald-600 dark:text-emerald-400 uppercase flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping inline-block"></span>
+                        ONLINE (100%)
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">All RTSP channels verified</div>
+                    </div>
+                  </div>
+
+                  {/* Camera Directory Table */}
+                  <div className="border border-border bg-card rounded-2xl p-6 shadow-sm space-y-4">
+                    <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 pb-2">
+                      <div>
+                        <h2 className="text-base font-bold text-foreground">Camera Hub Directory</h2>
+                        <p className="text-xs text-muted-foreground">Manage connected CCTV hardware nodes, network endpoints, and active streaming channels.</p>
+                      </div>
+                      {isTrialUser && isCameraLimitReached ? (
+                        <button
+                          onClick={() => {
+                            setActiveTab('subscription_detail');
+                            router.push('/dashboard?tab=subscription_detail');
+                          }}
+                          title="Your 1-camera trial limit is reached. Upgrade to connect more cameras."
+                          className="px-4 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black transition-all cursor-pointer shadow-md flex items-center gap-1.5 shrink-0 self-start sm:self-auto"
+                        >
+                          <ArrowUpCircle className="w-4 h-4" />
+                          <span>Upgrade for More Cameras</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setActiveTab('add_camera');
+                            router.push('/dashboard?tab=add_camera');
+                          }}
+                          className="px-4 py-2 text-xs font-bold rounded-xl bg-brand-blue hover:bg-brand-blue/90 text-white transition-all cursor-pointer shadow-md shadow-brand-blue/10 flex items-center gap-1.5 shrink-0 self-start sm:self-auto"
+                        >
+                          <PlusCircle className="w-4 h-4" />
+                          <span>Add Camera</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Search & Filter Bar */}
+                    <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                      <div className="relative flex-1">
+                        <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                        <input
+                          type="text"
+                          placeholder="Search cameras by name, key, IP address, or location..."
+                          value={cameraSearchQuery}
+                          onChange={(e) => setCameraSearchQuery(e.target.value)}
+                          className="w-full pl-9 pr-4 py-2 rounded-xl border border-border bg-background text-foreground text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-blue"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Filter className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                        <select
+                          value={cameraMfgFilter}
+                          onChange={(e) => setCameraMfgFilter(e.target.value)}
+                          className="px-3 py-2 rounded-xl border border-border bg-background text-foreground text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-brand-blue cursor-pointer"
+                        >
+                          <option value="ALL">All Manufacturers</option>
+                          <option value="Hikvision">Hikvision</option>
+                          <option value="Dahua">Dahua</option>
+                          <option value="Axis">Axis</option>
+                          <option value="CP Plus">CP Plus</option>
+                          <option value="Other">Other</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Directory Table */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className="border-b border-border text-muted-foreground uppercase font-mono text-[10px] bg-muted/50">
+                          <tr>
+                            <th className="py-3 px-4">Camera ID / Key</th>
+                            <th className="py-3 px-4">Camera Name & Location</th>
+                            <th className="py-3 px-4">IP & Port</th>
+                            <th className="py-3 px-4">Manufacturer</th>
+                            <th className="py-3 px-4">RTSP URL</th>
+                            <th className="py-3 px-4">Status</th>
+                            <th className="py-3 px-4 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/60 font-medium">
+                          {filteredCameras.length > 0 ? (
+                            filteredCameras.map((cam) => (
+                              <tr key={cam._id || cam.cameraKey} className="hover:bg-muted/30 transition-colors">
+                                <td className="py-3 px-4 font-mono font-bold text-brand-blue dark:text-brand-light-blue">
+                                  <div className="flex items-center gap-2">
+                                    <span>{cam.cameraKey}</span>
+                                    <button
+                                      onClick={() => {
+                                        navigator.clipboard.writeText(cam.cameraKey);
+                                        setCopiedKey(cam.cameraKey);
+                                        setTimeout(() => setCopiedKey(null), 2000);
+                                      }}
+                                      title="Copy Camera Key"
+                                      className="p-1 rounded hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                                    >
+                                      {copiedKey === cam.cameraKey ? (
+                                        <Check className="w-3.5 h-3.5 text-emerald-500" />
+                                      ) : (
+                                        <Copy className="w-3.5 h-3.5" />
+                                      )}
+                                    </button>
+                                  </div>
+                                </td>
+                                <td className="py-3 px-4">
+                                  <div className="font-bold text-foreground">{cam.name || cam.locationName || 'Camera Feed'}</div>
+                                  <div className="text-[10px] text-muted-foreground flex items-center gap-1.5">
+                                    <span>📍 {cam.locationName || 'Main Area'}</span>
+                                    {cam.cameraModel && (
+                                      <span className="px-1.5 py-0.2 rounded bg-muted text-muted-foreground font-mono text-[9px]">
+                                        {cam.cameraModel}
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="py-3 px-4 font-mono text-foreground/80">
+                                  {cam.ipAddress ? (
+                                    <span>{cam.ipAddress}:{cam.port || 554}</span>
+                                  ) : (
+                                    <span className="text-muted-foreground italic text-[11px]">Direct Stream</span>
+                                  )}
+                                </td>
+                                <td className="py-3 px-4">
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-muted border border-border text-foreground/90">
+                                    {cam.manufacturer || 'Hikvision'}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 font-mono text-[11px] text-muted-foreground max-w-[180px]">
+                                  {cam.rtspUrl ? (
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="truncate max-w-[130px]" title={cam.rtspUrl}>
+                                        {cam.rtspUrl}
+                                      </span>
+                                      <button
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(cam.rtspUrl);
+                                          setCopiedKey(cam.rtspUrl);
+                                          setTimeout(() => setCopiedKey(null), 2000);
+                                        }}
+                                        title="Copy RTSP URL"
+                                        className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
+                                      >
+                                        {copiedKey === cam.rtspUrl ? (
+                                          <Check className="w-3 h-3 text-emerald-500" />
+                                        ) : (
+                                          <Copy className="w-3 h-3" />
+                                        )}
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <span className="italic text-muted-foreground/60 text-[10px]">Auto Configured</span>
+                                  )}
+                                </td>
+                                <td className="py-3 px-4">
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 w-fit border border-emerald-500/20">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                    Active
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 text-right">
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <button
+                                      onClick={() => openViewModal(cam)}
+                                      title="View Camera Feed & Details"
+                                      className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-brand-blue/10 hover:bg-brand-blue/20 text-brand-blue dark:text-brand-light-blue transition-colors flex items-center gap-1 cursor-pointer border border-brand-blue/20"
+                                    >
+                                      <Eye className="w-3.5 h-3.5" />
+                                      <span>View</span>
+                                    </button>
+                                    <button
+                                      onClick={() => openSettingsModal(cam)}
+                                      title="Camera AI Rules & Device Settings"
+                                      className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 transition-colors flex items-center gap-1 cursor-pointer border border-amber-500/20"
+                                    >
+                                      <Settings className="w-3.5 h-3.5" />
+                                      <span>Settings</span>
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteCamera(cam.cameraKey)}
+                                      title="Delete Camera"
+                                      className="p-1 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr>
+                              <td colSpan={7} className="text-center py-12">
+                                <div className="max-w-sm mx-auto space-y-3">
+                                  <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center mx-auto text-muted-foreground">
+                                    <Video className="w-5 h-5" />
+                                  </div>
+                                  <div className="text-xs font-bold text-foreground">
+                                    {cameraSearchQuery ? "No cameras match your search" : "No Cameras Connected"}
+                                  </div>
+                                  <p className="text-[11px] text-muted-foreground">
+                                    {cameraSearchQuery
+                                      ? "Try searching with different terms or resetting filters."
+                                      : "Start by registering your first IP CCTV camera with your unique access key."}
+                                  </p>
+                                  {!cameraSearchQuery && (
+                                    isTrialUser && isCameraLimitReached ? (
+                                      <button
+                                        onClick={() => {
+                                          setActiveTab('subscription_detail');
+                                          router.push('/dashboard?tab=subscription_detail');
+                                        }}
+                                        className="px-4 py-2 text-xs font-bold rounded-xl bg-amber-500 hover:bg-amber-400 text-black transition-all cursor-pointer shadow-md inline-flex items-center gap-1.5 mt-2"
+                                      >
+                                        <ArrowUpCircle className="w-4 h-4" />
+                                        <span>Upgrade Plan for More Cameras</span>
+                                      </button>
+                                    ) : (
+                                      <button
+                                        onClick={() => {
+                                          setActiveTab('add_camera');
+                                          router.push('/dashboard?tab=add_camera');
+                                        }}
+                                        className="px-4 py-2 text-xs font-bold rounded-xl bg-brand-blue hover:bg-brand-blue/90 text-white transition-all cursor-pointer shadow-md shadow-brand-blue/15 inline-flex items-center gap-1.5 mt-2"
+                                      >
+                                        <PlusCircle className="w-4 h-4" />
+                                        <span>+ Add Your First Camera</span>
+                                      </button>
+                                    )
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'add_camera' && (
+                isTrialUser && isCameraLimitReached ? (
+                  <div className="space-y-6 w-full max-w-2xl mx-auto py-6">
+                    <div className="border border-border bg-card rounded-2xl p-8 shadow-sm text-center space-y-6">
+                      <div className="w-16 h-16 rounded-2xl bg-amber-500/15 text-amber-500 border border-amber-500/30 flex items-center justify-center mx-auto">
+                        <Camera className="w-8 h-8" />
+                      </div>
+                      <div className="space-y-2">
+                        <span className="text-[11px] font-mono font-bold px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                          DEMO FREE TRIAL · 1/1 CAMERA ACTIVE
+                        </span>
+                        <h2 className="text-xl font-black text-foreground pt-1">Trial Camera Limit Reached</h2>
+                        <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
+                          Your <strong>Demo Free</strong> trial plan includes <strong>1 CCTV camera node</strong>, which was already configured during your account signup onboarding. New camera registration is disabled for this trial tier.
+                        </p>
+                      </div>
+
+                      {/* Configured Camera Info */}
+                      {cameras.length > 0 && (
+                        <div className="bg-background/60 border border-border rounded-xl p-4 text-left max-w-md mx-auto space-y-2 text-xs">
+                          <div className="text-[10px] font-bold text-muted-foreground uppercase font-mono">Your Active Trial Camera:</div>
+                          <div className="flex justify-between items-center">
+                            <span className="font-bold text-foreground">{cameras[0].name || cameras[0].locationName}</span>
+                            <span className="font-mono text-[11px] text-brand-blue dark:text-brand-light-blue font-bold">{cameras[0].cameraKey}</span>
+                          </div>
+                          <div className="text-[11px] text-muted-foreground flex justify-between">
+                            <span>{cameras[0].manufacturer || 'CCTV'} · {cameras[0].cameraModel || 'Standard'}</span>
+                            <span>{cameras[0].ipAddress ? `${cameras[0].ipAddress}:${cameras[0].port}` : cameras[0].locationName}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+                        <button
+                          onClick={() => {
+                            setActiveTab('live_camera');
+                            router.push('/dashboard?tab=live_camera');
+                          }}
+                          className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-border hover:bg-muted text-xs font-bold text-foreground transition-all cursor-pointer flex items-center justify-center gap-2"
+                        >
+                          <Video className="w-4 h-4" />
+                          <span>View Live Stream</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setActiveTab('subscription_detail');
+                            router.push('/dashboard?tab=subscription_detail');
+                          }}
+                          className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-2 shadow-md"
+                        >
+                          <ArrowUpCircle className="w-4 h-4" />
+                          <span>Upgrade to Add More Cameras</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                <div className="space-y-6 w-full max-w-4xl mx-auto">
+                  {/* Header & Camera Licenses Row (Parallel) */}
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                      <h2 className="text-xl font-black tracking-tight text-foreground font-sans">Add Camera</h2>
+                      <p className="text-xs text-muted-foreground font-sans">Add and configure a new security camera</p>
+                    </div>
+
+                    {/* TOP-RIGHT: Compact Camera Licenses Widget */}
+                    <div className="w-full sm:w-80 border border-border bg-card rounded-2xl p-3.5 shadow-sm space-y-2 shrink-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold text-foreground">Camera Licenses</span>
+                          {cameras.length >= (customer?.cameras || 5) ? (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/20">
+                              Full
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                              {(customer?.cameras || 5) - cameras.length} Available
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-xs font-bold font-mono text-muted-foreground">
+                          {cameras.length} / {customer?.cameras || 5} Used
+                        </span>
+                      </div>
+
+                      {/* Progress Bar */}
+                      <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full rounded-full transition-all duration-500 ${
+                            cameras.length >= (customer?.cameras || 5)
+                              ? 'bg-red-500'
+                              : 'bg-brand-blue'
+                          }`}
+                          style={{ width: `${Math.min(100, (cameras.length / (customer?.cameras || 5)) * 100)}%` }}
+                        />
+                      </div>
+
+                      {cameras.length >= (customer?.cameras || 5) ? (
+                        <div className="text-[10px] text-red-500 font-semibold flex items-center gap-1">
+                          <AlertCircle className="h-3 w-3 shrink-0" />
+                          <span>Limit reached ({customer?.cameras || 5} max). Upgrade plan.</span>
+                        </div>
+                      ) : (
+                        <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                          <CheckCircle className="h-3 w-3 text-emerald-500 shrink-0" />
+                          <span>{ (customer?.cameras || 5) - cameras.length } more slots available.</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Connection Test Results Card (if triggered) */}
+                  {connectionStatus && (
+                    <div className={`border rounded-2xl p-4 shadow-sm space-y-1.5 animate-fadeIn ${
+                      connectionStatus.success 
+                        ? 'border-emerald-500/30 bg-emerald-500/5' 
+                        : 'border-red-500/30 bg-red-500/5'
+                    }`}>
+                      <div className="flex gap-2.5 items-start text-xs leading-relaxed font-sans">
+                        {connectionStatus.success ? (
+                          <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
+                        ) : (
+                          <AlertCircle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
+                        )}
+                        <div className="space-y-0.5">
+                          <span className={`font-bold block ${connectionStatus.success ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                            {connectionStatus.success ? 'Connection Succeeded' : 'Connection Failed'}
+                          </span>
+                          <p className="text-muted-foreground text-[11px]">
+                            {connectionStatus.message}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Centered Full Width Form Cards */}
+                  <div className="space-y-6 w-full">
+                    
+                    {/* Panel 1: Camera Connection Card */}
+                    <div className="border border-border bg-card rounded-2xl p-6 shadow-sm space-y-5">
+                      <div className="border-b border-border/60 pb-3">
+                        <h3 className="text-sm font-bold text-foreground">Camera Connection</h3>
+                        <p className="text-xs text-muted-foreground">Network and credentials to interface with device</p>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Camera Name */}
+                        <div className="space-y-1.5 md:col-span-2">
+                          <label className="text-xs font-bold text-muted-foreground block">Camera Name <span className="text-red-500">*</span></label>
+                          <input
+                            type="text"
+                            placeholder="Enter camera name (e.g. Main Entrance)"
+                            value={camName}
+                            onChange={(e) => setCamName(e.target.value)}
+                            className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-blue"
+                          />
+                        </div>
+
+                        {/* IP Address */}
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-muted-foreground block">IP Address <span className="text-red-500">*</span></label>
+                          <input
+                            type="text"
+                            placeholder="Enter camera IP address (e.g. 192.168.1.100)"
+                            value={camIp}
+                            onChange={(e) => setCamIp(e.target.value)}
+                            className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-blue font-mono"
+                          />
+                        </div>
+
+                        {/* Port */}
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-muted-foreground block">Port <span className="text-red-500">*</span></label>
+                          <input
+                            type="number"
+                            placeholder="554"
+                            value={camPort}
+                            onChange={(e) => setCamPort(e.target.value)}
+                            className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-blue font-mono"
+                          />
+                        </div>
+
+                        {/* Username */}
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-muted-foreground block">Username <span className="text-red-500">*</span></label>
+                          <input
+                            type="text"
+                            placeholder="Enter camera username"
+                            value={camUsername}
+                            onChange={(e) => setCamUsername(e.target.value)}
+                            className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-blue"
+                          />
+                        </div>
+
+                        {/* Password */}
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-muted-foreground block">Password <span className="text-red-500">*</span></label>
+                          <div className="relative">
+                            <input
+                              type={showPassword ? "text" : "password"}
+                              placeholder="Enter camera password"
+                              value={camPassword}
+                              onChange={(e) => setCamPassword(e.target.value)}
+                              className="w-full pl-4 pr-10 py-2.5 rounded-xl border border-border bg-background text-foreground text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-blue"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowPassword(!showPassword)}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors focus:outline-none cursor-pointer"
+                            >
+                              {showPassword ? (
+                                <EyeOff className="h-4 w-4" />
+                              ) : (
+                                <Eye className="h-4 w-4" />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* RTSP URL */}
+                        <div className="space-y-1.5 md:col-span-2">
+                          <label className="text-xs font-bold text-muted-foreground block">RTSP URL <span className="text-red-500">*</span></label>
+                          <input
+                            type="text"
+                            placeholder="rtsp://username:password@ip:port/stream1"
+                            value={camRtsp}
+                            onChange={(e) => setCamRtsp(e.target.value)}
+                            className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground text-xs font-mono focus:outline-none focus:ring-1 focus:ring-brand-blue"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Panel 2: Camera Information Card */}
+                    <div className="border border-border bg-card rounded-2xl p-6 shadow-sm space-y-5">
+                      <div className="border-b border-border/60 pb-3">
+                        <h3 className="text-sm font-bold text-foreground">Camera Information</h3>
+                        <p className="text-xs text-muted-foreground">Manufacturer and hardware parameters (Optional)</p>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {/* Manufacturer */}
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-muted-foreground block">Manufacturer</label>
+                          <select
+                            value={camMfg}
+                            onChange={(e) => setCamMfg(e.target.value)}
+                            className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-brand-blue cursor-pointer"
+                          >
+                            <option value="Hikvision">Hikvision</option>
+                            <option value="Dahua">Dahua</option>
+                            <option value="Axis">Axis</option>
+                            <option value="CP Plus">CP Plus</option>
+                            <option value="Other">Other</option>
+                          </select>
+                        </div>
+
+                        {/* Camera Model */}
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-muted-foreground block">Camera Model</label>
+                          <input
+                            type="text"
+                            placeholder="Enter camera model"
+                            value={camModel}
+                            onChange={(e) => setCamModel(e.target.value)}
+                            className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-blue"
+                          />
+                        </div>
+
+                        {/* Camera Location */}
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-muted-foreground block">Camera Location</label>
+                          <input
+                            type="text"
+                            placeholder="Enter camera location (e.g. Warehouse 1)"
+                            value={camLocation}
+                            onChange={(e) => setCamLocation(e.target.value)}
+                            className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-blue"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Action Area */}
+                    <div className="flex flex-wrap gap-4 items-center justify-end pt-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!camIp || !camPort || !camUsername || !camPassword || !camRtsp) {
+                            alert("Please enter all required camera details.");
+                            return;
+                          }
+                          setIsTesting(true);
+                          setConnectionStatus(null);
+                          try {
+                            const res = await fetch('/api/cameras/test-connection', {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json',
+                                Authorization: `Bearer ${user?.token}`
+                              },
+                              body: JSON.stringify({
+                                ipAddress: camIp.trim(),
+                                port: camPort.trim(),
+                                username: camUsername.trim(),
+                                password: camPassword.trim(),
+                                rtspUrl: camRtsp.trim()
+                              })
+                            });
+                            const data = await res.json();
+                            if (data.success) {
+                              setConnectionStatus({ success: true, message: "✓ Camera connected successfully" });
+                            } else {
+                              setConnectionStatus({
+                                success: false,
+                                message: data.error || "Unable to connect to camera. Please verify the IP address, port, credentials, and RTSP URL."
+                              });
+                            }
+                          } catch (err) {
+                            setConnectionStatus({
+                              success: false,
+                              message: "Unable to connect to the camera. Please verify the connection details."
+                            });
+                          } finally {
+                            setIsTesting(false);
+                          }
+                        }}
+                        disabled={isTesting || isAdding}
+                        className="px-6 py-3 rounded-xl border border-border hover:bg-muted text-foreground font-bold text-xs transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isTesting ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Testing Connection...
+                          </>
+                        ) : (
+                          "Test Connection"
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!camName || !camIp || !camPort || !camUsername || !camPassword || !camRtsp) {
+                            alert("Please enter all required camera details.");
+                            return;
+                          }
+                          if (cameras.length >= (customer?.cameras || 5)) {
+                            alert(`Camera limit reached. Your current subscription allows up to ${customer?.cameras || 5} cameras.`);
+                            return;
+                          }
+
+                          setIsAdding(true);
+                          try {
+                            const res = await fetch('/api/cameras', {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json',
+                                Authorization: `Bearer ${user?.token}`
+                              },
+                              body: JSON.stringify({
+                                name: camName.trim(),
+                                ipAddress: camIp.trim(),
+                                port: camPort.trim(),
+                                username: camUsername.trim(),
+                                password: camPassword.trim(),
+                                rtspUrl: camRtsp.trim(),
+                                manufacturer: camMfg,
+                                cameraModel: camModel.trim(),
+                                locationName: camLocation.trim() || camName.trim()
+                              })
+                            });
+                            const data = await res.json();
+                            if (data.success && data.data) {
+                              // Add to list
+                              setCameras([data.data, ...cameras]);
+                              setActiveCameraKey(data.data.cameraKey);
+                              
+                              // Reset form
+                              setCamName('');
+                              setCamIp('');
+                              setCamPort('554');
+                              setCamUsername('');
+                              setCamPassword('');
+                              setCamRtsp('');
+                              setCamMfg('Hikvision');
+                              setCamModel('');
+                              setCamLocation('');
+                              setConnectionStatus(null);
+
+                              alert("Camera registered successfully!");
+                              // Navigate to Live Camera stream
+                              router.push('/dashboard?tab=live_camera');
+                            } else {
+                              alert(data.error || "Failed to add camera.");
+                            }
+                          } catch (err) {
+                            alert("An unexpected error occurred while adding the camera.");
+                          } finally {
+                            setIsAdding(false);
+                          }
+                        }}
+                        disabled={isTesting || isAdding || cameras.length >= (customer?.cameras || 5)}
+                        className="px-6 py-3 rounded-xl bg-brand-blue hover:bg-brand-blue/90 text-white font-bold text-xs transition-all cursor-pointer flex items-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-muted"
+                      >
+                        {isAdding ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Adding Camera...
+                          </>
+                        ) : (
+                          "Add Camera"
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                )
+              )}
+
               {activeTab === 'zones' && (
                 <ZoneManagementView
                   user={user}
@@ -1530,32 +2817,482 @@ function DashboardContent() {
                 />
               )}
 
-              {activeTab === 'subscription_detail' && (
-                <div className="max-w-2xl border border-border bg-card rounded-lg p-6 space-y-6 shadow-sm">
-                  <div className="flex justify-between items-center">
-                    <h2 className="text-lg font-bold text-foreground">Subscription Details</h2>
-                    <span className="px-3 py-1 rounded bg-brand-gold/20 text-[#C0A06E] font-bold text-xs">Active Plan</span>
+              {activeTab === 'invoices' && (
+                <div className="space-y-6 max-w-5xl mx-auto w-full">
+                  <div className="flex justify-between items-center pb-4 border-b border-border">
+                    <div>
+                      <h2 className="text-xl font-extrabold text-foreground font-sans">Billing Invoices & Statements</h2>
+                      <p className="text-xs text-muted-foreground">Live billing history and receipts fetched directly from database.</p>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4 text-xs font-mono">
-                     <div>
-                       <span className="text-muted-foreground block mb-1">PLAN NAME</span>
-                       <span className="font-bold text-sm text-foreground">Enterprise Pro</span>
-                     </div>
-                     <div>
-                       <span className="text-muted-foreground block mb-1">CAMERA LICENSES</span>
-                       <span className="font-bold text-sm text-brand-gold-light">12 / 20 Allocated</span>
-                     </div>
-                     <div>
-                       <span className="text-muted-foreground block mb-1">BILLING CYCLE</span>
-                       <span className="font-bold text-sm text-foreground">Monthly ($1,299)</span>
-                     </div>
-                     <div>
-                       <span className="text-muted-foreground block mb-1">RENEWAL DATE</span>
-                       <span className="font-bold text-sm text-foreground">Sept 01, 2026</span>
-                     </div>
+
+                  <div className="border border-border bg-card rounded-2xl p-6 shadow-sm space-y-4">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className="border-b border-border text-muted-foreground uppercase font-mono text-[10px] bg-muted/50">
+                          <tr>
+                            <th className="py-3 px-4">Invoice ID</th>
+                            <th className="py-3 px-4">Description</th>
+                            <th className="py-3 px-4">Billing Date</th>
+                            <th className="py-3 px-4">Due Date</th>
+                            <th className="py-3 px-4">Amount</th>
+                            <th className="py-3 px-4">Status</th>
+                            <th className="py-3 px-4 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/60 font-medium">
+                          {dbInvoices.length > 0 ? (
+                            dbInvoices.map((inv: any) => (
+                              <tr key={inv._id || inv.invoiceNumber} className="hover:bg-muted/30 transition-colors">
+                                <td className="py-3 px-4 font-mono font-bold text-foreground">{inv.invoiceNumber}</td>
+                                <td className="py-3 px-4 text-foreground/90 font-sans">{inv.description || `${inv.planName} Subscription`}</td>
+                                <td className="py-3 px-4 text-foreground/80 font-mono">
+                                  {inv.billingDate ? new Date(inv.billingDate).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : 'N/A'}
+                                </td>
+                                <td className="py-3 px-4 text-foreground/80 font-mono">
+                                  {inv.dueDate ? new Date(inv.dueDate).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : 'N/A'}
+                                </td>
+                                <td className="py-3 px-4 font-bold text-foreground/90 font-mono">${Number(inv.amount).toFixed(2)}</td>
+                                <td className="py-3 px-4">
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    inv.status === 'Paid' ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-400' :
+                                    inv.status === 'Overdue' ? 'bg-red-500/20 text-red-700 dark:text-red-400' :
+                                    'bg-amber-500/20 text-amber-700 dark:text-amber-400'
+                                  }`}>
+                                    {inv.status}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 text-right">
+                                  <button 
+                                    onClick={() => alert(`Downloading PDF receipt for invoice ${inv.invoiceNumber}`)}
+                                    className="px-2.5 py-1 text-[11px] font-bold rounded-lg border border-border hover:bg-muted text-foreground transition-all cursor-pointer font-sans"
+                                  >
+                                    Download PDF
+                                  </button>
+                                </td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr>
+                              <td colSpan={7} className="py-8 text-center text-muted-foreground font-sans">
+                                {loadingInvoices ? "Loading authentic database invoices..." : "No invoices recorded in the database yet."}
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
               )}
+
+              {activeTab === 'subscription_detail' && (() => {
+                const plansList = Array.isArray(dbPlans) ? dbPlans : [];
+                const activePlanDoc = plansList.find((p: any) => p.name?.toLowerCase() === (customer?.plan || '').toLowerCase()) 
+                  || plansList.find((p: any) => p.name === "Enterprise Pro") 
+                  || (plansList.length > 0 ? plansList[0] : null);
+
+                const planTitle = customer?.plan || activePlanDoc?.name || "Enterprise Pro";
+                const monthlyCost = activePlanDoc ? activePlanDoc.monthlyPrice : 1299;
+                const yearlyCost = activePlanDoc ? activePlanDoc.yearlyPrice : (monthlyCost * 12 * 0.8);
+                const cameraLimit = customer?.cameras || activePlanDoc?.maxCameras || 5;
+                const planDesc = activePlanDoc?.description || "Enterprise CCTV video analytics engine with AI intrusion, tracking, and instant alerts.";
+                const planFeatures = activePlanDoc?.features || ["intrusion_detection", "camera_offline", "whatsapp_alerts", "fire_smoke"];
+
+                const renewalDateStr = customer?.createdAt
+                  ? new Date(new Date(customer.createdAt).getTime() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })
+                  : 'Sept 01, 2026';
+
+                return (
+                  <div className="space-y-6 max-w-5xl mx-auto w-full">
+                    {/* Top Header & Breadcrumbs */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border/70">
+                      <div>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono uppercase tracking-wider mb-1">
+                          <span>Billing</span>
+                          <span>/</span>
+                          <span className="text-foreground font-semibold">Subscription & Plan</span>
+                        </div>
+                        <h2 className="text-xl font-bold text-foreground tracking-tight">Subscription Overview</h2>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Overview of your current plan tier, resource allocation, and payment details from database.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2.5">
+                        <button
+                          onClick={() => setActiveTab('invoices')}
+                          className="px-3.5 py-2 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-muted text-foreground transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+                        >
+                          <Receipt className="w-3.5 h-3.5 text-muted-foreground" />
+                          <span>Billing History ({dbInvoices.length})</span>
+                        </button>
+                        <button
+                          onClick={() => alert("Please contact enterprise sales at support@corewatch.ai to customize or upgrade your license tier.")}
+                          className="px-4 py-2 text-xs font-semibold rounded-lg bg-[var(--primary)] hover:opacity-95 text-white transition-all cursor-pointer shadow-sm flex items-center gap-1.5"
+                        >
+                          <Zap className="w-3.5 h-3.5 text-amber-300" />
+                          <span>Change Plan</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 1. Main Subscription Status Card */}
+                    <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-6">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-lg font-bold text-foreground tracking-tight">
+                              {planTitle} Plan
+                            </span>
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${
+                              customer?.status === 'Active' 
+                                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                                : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${customer?.status === 'Active' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`}></span>
+                              {customer?.status || 'Active'}
+                            </span>
+                            <span className="text-[11px] font-mono font-medium px-2 py-0.5 rounded bg-muted text-muted-foreground border border-border">
+                              Auto-Renew ON
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted-foreground leading-relaxed">
+                            {planDesc}
+                          </p>
+                        </div>
+
+                        <div className="text-left md:text-right flex-shrink-0">
+                          <div className="text-2xl font-bold font-mono text-foreground tracking-tight">
+                            {monthlyCost === 0 ? (
+                              <span className="text-emerald-500">Free Trial</span>
+                            ) : (
+                              <>
+                                ${monthlyCost}<span className="text-xs font-normal text-muted-foreground font-sans"> / month</span>
+                              </>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground mt-0.5 font-mono">
+                            {monthlyCost === 0 ? "14-Day Free Evaluation" : `Billed annually ($${yearlyCost}/yr)`}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-border/60 text-xs">
+                        <div>
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block mb-1">Billing Interval</span>
+                          <span className="font-semibold text-foreground">Annual Recurring</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block mb-1">Next Charge Date</span>
+                          <span className="font-semibold text-foreground font-mono">{renewalDateStr}</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block mb-1">Payment Method</span>
+                          <span className="font-semibold text-foreground font-mono">
+                            {dbInvoices.length > 0 ? dbInvoices[0].paymentMethod : "Visa •••• 4242"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block mb-1">Service SLA</span>
+                          <span className="font-semibold text-emerald-600 dark:text-emerald-400">99.95% Guaranteed</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 2. Resource Utilization & Quotas */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Camera Capacity Gauge */}
+                      <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h3 className="text-sm font-bold text-foreground">Camera Streams Quota</h3>
+                            <p className="text-xs text-muted-foreground">Live streams allocated to your account</p>
+                          </div>
+                          <span className="text-xs font-mono font-bold text-foreground">
+                            {cameras.length} / {cameraLimit} Channels
+                          </span>
+                        </div>
+
+                        {/* Progress Bar */}
+                        <div className="space-y-1.5">
+                          <div className="w-full h-2 rounded-full bg-muted overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-[var(--primary)] transition-all duration-300"
+                              style={{ width: `${Math.min(100, (cameras.length / cameraLimit) * 100)}%` }}
+                            ></div>
+                          </div>
+                          <div className="flex justify-between text-[10px] font-mono text-muted-foreground">
+                            <span>{Math.round((cameras.length / cameraLimit) * 100)}% utilized</span>
+                            <span>{Math.max(0, cameraLimit - cameras.length)} channels remaining</span>
+                          </div>
+                        </div>
+
+                        <div className="divide-y divide-border/50 text-xs pt-1">
+                          <div className="flex justify-between py-2 text-muted-foreground">
+                            <span>Provisioned Database Limit:</span>
+                            <span className="font-semibold text-foreground font-mono">{cameraLimit} Feeds</span>
+                          </div>
+                          <div className="flex justify-between py-2 text-muted-foreground">
+                            <span>Currently Active Cameras:</span>
+                            <span className="font-semibold text-emerald-600 dark:text-emerald-400 font-mono">{cameras.length} Feeds</span>
+                          </div>
+                          <div className="flex justify-between py-2 text-muted-foreground">
+                            <span>Available Free Slots:</span>
+                            <span className="font-semibold text-foreground font-mono">{Math.max(0, cameraLimit - cameras.length)} Feeds</span>
+                          </div>
+                        </div>
+
+                        {isTrialUser && isCameraLimitReached ? (
+                          <button
+                            onClick={() => {
+                              alert("Please contact enterprise sales at support@corewatch.ai or choose an upgraded plan to increase your camera limit.");
+                            }}
+                            className="w-full py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-sm"
+                          >
+                            <ArrowUpCircle className="w-3.5 h-3.5" />
+                            <span>Upgrade Plan to Add More Cameras</span>
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setActiveTab('add_camera')}
+                            className="w-full py-2 rounded-lg border border-border hover:bg-muted text-xs font-semibold text-foreground transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                          >
+                            <PlusCircle className="w-3.5 h-3.5 text-muted-foreground" />
+                            <span>Provision New Camera Feed</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* AI Engine & Storage Limits */}
+                      <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
+                        <div>
+                          <h3 className="text-sm font-bold text-foreground">Storage & Processing Limits</h3>
+                          <p className="text-xs text-muted-foreground">Cloud event history and inference capabilities</p>
+                        </div>
+
+                        <div className="space-y-3 text-xs">
+                          <div className="p-3 rounded-lg bg-background border border-border/70 flex items-start gap-3">
+                            <HardDrive className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
+                            <div className="space-y-0.5">
+                              <div className="font-semibold text-foreground">30-Day Cloud Video Retention</div>
+                              <div className="text-[11px] text-muted-foreground">Security violation snapshots & JSON telemetry stored for 30 days.</div>
+                            </div>
+                          </div>
+
+                          <div className="p-3 rounded-lg bg-background border border-border/70 flex items-start gap-3">
+                            <Activity className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                            <div className="space-y-0.5">
+                              <div className="font-semibold text-foreground">Unlimited Real-Time AI Inference</div>
+                              <div className="text-[11px] text-muted-foreground">Sub-100ms ultra-low latency person detection and loitering analysis.</div>
+                            </div>
+                          </div>
+
+                          <div className="p-3 rounded-lg bg-background border border-border/70 flex items-start gap-3">
+                            <Bell className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+                            <div className="space-y-0.5">
+                              <div className="font-semibold text-foreground">Multi-Channel Dispatches</div>
+                              <div className="text-[11px] text-muted-foreground">Zero-latency browser SSE events, email summaries, and WhatsApp alerts.</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 3. Included Features & Entitlements Checklist */}
+                    <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-5">
+                      <div>
+                        <h3 className="text-sm font-bold text-foreground">Plan Entitlements & Features</h3>
+                        <p className="text-xs text-muted-foreground">Capabilities enabled under the {planTitle} database plan.</p>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 pt-1">
+                        <div className="space-y-3">
+                          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground font-semibold">
+                            AI Analytics & Computer Vision
+                          </div>
+
+                          {[
+                            { key: "intrusion_detection", title: "Real-Time Person & Zone Detection", desc: "Ultra-fast neural network identifying personnel and restricted zone tripwires." },
+                            { key: "loitering", title: "DeepSORT Behavior & Loitering", desc: "Persistent multi-person track continuity and dwell threshold alerts." },
+                            { key: "cctv_hub", title: "Multi-Camera Live Video Hub", desc: "Simultaneous live CCTV streams with AI HUD overlay inspection." },
+                            { key: "fire_smoke", title: "Fire & Smoke Analytics", desc: "Safety detection for active flame and smoke plumes in work environments." }
+                          ].map((item, idx) => {
+                            const isIncluded = planFeatures.length === 0 || planFeatures.includes(item.key) || item.key === 'cctv_hub' || item.key === 'loitering' || item.key === 'intrusion_detection';
+                            return (
+                              <div key={idx} className="flex items-start gap-2.5 text-xs">
+                                <div className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
+                                  isIncluded ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-muted text-muted-foreground'
+                                }`}>
+                                  <Check className="w-2.5 h-2.5 stroke-[3]" />
+                                </div>
+                                <div>
+                                  <span className="font-semibold text-foreground">{item.title}</span>
+                                  <p className="text-[11px] text-muted-foreground leading-relaxed">{item.desc}</p>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        <div className="space-y-3">
+                          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground font-semibold">
+                            Enterprise Infrastructure & Security
+                          </div>
+
+                          {[
+                            { key: "camera_offline", title: "Camera Status Monitor & Offline Watchdog", desc: "Automated instant notification when any camera video stream disconnects." },
+                            { key: "dedicated_key", title: "Dedicated Cryptographic Camera Key", desc: "Per-stream authorization tokens securing camera connectivity." },
+                            { key: "whatsapp_alerts", title: "Real-Time Webhook & WhatsApp Alerts", desc: "Instant automated dispatch pipelines with snapshot attachments." },
+                            { key: "support", title: "24/7 Priority Technical Support", desc: "Dedicated enterprise account engineer with 1-hour SLA response." },
+                          ].map((item, idx) => {
+                            return (
+                              <div key={idx} className="flex items-start gap-2.5 text-xs">
+                                <div className="w-4 h-4 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
+                                  <Check className="w-2.5 h-2.5 stroke-[3]" />
+                                </div>
+                                <div>
+                                  <span className="font-semibold text-foreground">{item.title}</span>
+                                  <p className="text-[11px] text-muted-foreground leading-relaxed">{item.desc}</p>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 4. Payment Method & Billing Details (2-Column Grid) */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Payment Method Card */}
+                      <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-sm font-bold text-foreground">Payment Method</h3>
+                          <span className="text-[10px] font-mono uppercase font-semibold px-2 py-0.5 rounded bg-muted text-muted-foreground border border-border">
+                            Default
+                          </span>
+                        </div>
+
+                        <div className="p-4 rounded-lg bg-background border border-border/80 flex items-center justify-between gap-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-7 rounded bg-muted border border-border flex items-center justify-center font-bold text-[10px] tracking-wider text-foreground font-mono">
+                              VISA
+                            </div>
+                            <div>
+                              <div className="text-xs font-bold text-foreground font-mono">
+                                {dbInvoices.length > 0 ? dbInvoices[0].paymentMethod : "Visa •••• 4242"}
+                              </div>
+                              <div className="text-[11px] text-muted-foreground">Expires 09/2028 · Primary Card</div>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => alert("Payment gateway portal will open to update billing details.")}
+                            className="text-xs font-semibold text-brand-blue dark:text-brand-light-blue hover:underline cursor-pointer"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Billing Information Card */}
+                      <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-sm font-bold text-foreground">Billing Details</h3>
+                          <button
+                            onClick={() => setActiveTab('profile')}
+                            className="text-xs font-semibold text-brand-blue dark:text-brand-light-blue hover:underline cursor-pointer flex items-center gap-1"
+                          >
+                            Update <ArrowRight className="w-3 h-3" />
+                          </button>
+                        </div>
+
+                        <div className="p-4 rounded-lg bg-background border border-border/80 grid grid-cols-2 gap-3 text-xs">
+                          <div>
+                            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">Company</span>
+                            <span className="font-semibold text-foreground">{customer?.company || 'Not Configured'}</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">Customer ID</span>
+                            <span className="font-semibold text-foreground font-mono">{customer?._id || customer?.id || 'CUST-101'}</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">Billing Email</span>
+                            <span className="font-semibold text-foreground truncate block">{customer?.email || user?.email}</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">Country</span>
+                            <span className="font-semibold text-foreground">{customer?.country || 'India'}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 5. Recent Invoices Section */}
+                    <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className="text-sm font-bold text-foreground">Recent Invoices</h3>
+                          <p className="text-xs text-muted-foreground">Download receipts from previous billing periods (MongoDB records).</p>
+                        </div>
+                        <button
+                          onClick={() => setActiveTab('invoices')}
+                          className="text-xs font-semibold text-brand-blue dark:text-brand-light-blue hover:underline cursor-pointer flex items-center gap-1"
+                        >
+                          View all invoices ({dbInvoices.length}) <ArrowRight className="w-3 h-3" />
+                        </button>
+                      </div>
+
+                      <div className="overflow-x-auto border border-border/70 rounded-lg">
+                        <table className="w-full text-left text-xs">
+                          <thead className="border-b border-border/70 text-muted-foreground font-mono uppercase text-[10px] bg-muted/40">
+                            <tr>
+                              <th className="py-2.5 px-3.5">Invoice #</th>
+                              <th className="py-2.5 px-3.5">Date</th>
+                              <th className="py-2.5 px-3.5">Description</th>
+                              <th className="py-2.5 px-3.5">Amount</th>
+                              <th className="py-2.5 px-3.5">Status</th>
+                              <th className="py-2.5 px-3.5 text-right">Receipt</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border/50">
+                            {dbInvoices.length > 0 ? (
+                              dbInvoices.slice(0, 3).map((inv: any) => (
+                                <tr key={inv._id || inv.invoiceNumber} className="hover:bg-muted/20 transition-colors">
+                                  <td className="py-2.5 px-3.5 font-mono font-semibold text-foreground">{inv.invoiceNumber}</td>
+                                  <td className="py-2.5 px-3.5 text-muted-foreground font-mono">
+                                    {inv.billingDate ? new Date(inv.billingDate).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : 'N/A'}
+                                  </td>
+                                  <td className="py-2.5 px-3.5 text-foreground">{inv.description || `${inv.planName} Subscription`}</td>
+                                  <td className="py-2.5 px-3.5 font-mono font-semibold text-foreground">${Number(inv.amount).toFixed(2)}</td>
+                                  <td className="py-2.5 px-3.5">
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                                      {inv.status}
+                                    </span>
+                                  </td>
+                                  <td className="py-2.5 px-3.5 text-right">
+                                    <button
+                                      onClick={() => alert(`Downloading PDF receipt for invoice ${inv.invoiceNumber}`)}
+                                      className="text-[11px] font-semibold text-brand-blue dark:text-brand-light-blue hover:underline cursor-pointer"
+                                    >
+                                      Download PDF
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))
+                            ) : (
+                              <tr>
+                                <td colSpan={6} className="py-6 text-center text-muted-foreground font-sans">
+                                  {loadingInvoices ? "Loading invoices from database..." : "No invoices found in database."}
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {activeTab === 'event_history' && (
                 <div className="border border-border bg-card rounded-lg p-6 space-y-4 shadow-sm">
@@ -1664,34 +3401,61 @@ function DashboardContent() {
                   </div>
 
                   <div className="pt-4 border-t border-border space-y-4">
-                    <h3 className="text-xs font-bold text-foreground">Register Another Camera Location</h3>
-                    <button
-                      onClick={async () => {
-                        const name = prompt("Enter location name (e.g. Back Alley, Main Entrance):");
-                        if (!name) return;
-                        try {
-                          const res = await fetch('/api/cameras', {
-                            method: 'POST',
-                            headers: { 
-                              'Content-Type': 'application/json',
-                              Authorization: `Bearer ${user?.token}` 
-                            },
-                            body: JSON.stringify({ locationName: name })
-                          });
-                          const data = await res.json();
-                          if (data.success && data.data) {
-                            setCameras([data.data, ...cameras]);
-                            setActiveCameraKey(data.data.cameraKey);
-                            alert(`Successfully provisioned new key: ${data.data.cameraKey}`);
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-bold text-foreground">Register Another Camera Location</h3>
+                      {isTrialUser && (
+                        <span className="text-[10px] font-mono text-amber-500 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                          Trial Limit: 1 Location
+                        </span>
+                      )}
+                    </div>
+                    {isTrialUser && isCameraLimitReached ? (
+                      <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/5 text-xs space-y-2">
+                        <p className="text-[11px] text-muted-foreground leading-relaxed">
+                          Your Demo Free account is limited to 1 camera stream (configured during onboarding). To add more camera locations, please upgrade your plan.
+                        </p>
+                        <button
+                          onClick={() => {
+                            setActiveTab('subscription_detail');
+                            router.push('/dashboard?tab=subscription_detail');
+                          }}
+                          className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs transition-all cursor-pointer flex items-center gap-1.5"
+                        >
+                          <ArrowUpCircle className="w-3.5 h-3.5" />
+                          <span>Upgrade Plan</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={async () => {
+                          const name = prompt("Enter location name (e.g. Back Alley, Main Entrance):");
+                          if (!name) return;
+                          try {
+                            const res = await fetch('/api/cameras', {
+                              method: 'POST',
+                              headers: { 
+                                'Content-Type': 'application/json',
+                                Authorization: `Bearer ${user?.token}` 
+                              },
+                              body: JSON.stringify({ locationName: name })
+                            });
+                            const data = await res.json();
+                            if (data.success && data.data) {
+                              setCameras([data.data, ...cameras]);
+                              setActiveCameraKey(data.data.cameraKey);
+                              alert(`Successfully provisioned new key: ${data.data.cameraKey}`);
+                            } else {
+                              alert(data.error || "Failed to provision new camera key.");
+                            }
+                          } catch (err) {
+                            alert("Failed to provision new camera key.");
                           }
-                        } catch (err) {
-                          alert("Failed to provision new camera key.");
-                        }
-                      }}
-                      className="px-4 py-2 text-xs font-bold border border-border hover:bg-muted rounded-xl transition-all cursor-pointer text-foreground"
-                    >
-                      + Add Camera Location
-                    </button>
+                        }}
+                        className="px-4 py-2 text-xs font-bold border border-border hover:bg-muted rounded-xl transition-all cursor-pointer text-foreground"
+                      >
+                        + Add Camera Location
+                      </button>
+                    )}
 
                     {cameras.length > 1 && (
                       <div className="space-y-1 pt-2">
@@ -1708,6 +3472,140 @@ function DashboardContent() {
                           ))}
                         </select>
                       </div>
+                    )}
+                  </div>
+
+                  {/* AI Features Management Panel */}
+                  <div className="pt-6 border-t border-border space-y-4">
+                    <div>
+                      <h3 className="text-sm font-bold text-foreground">AI Core Analytics Settings</h3>
+                      <p className="text-[11px] text-muted-foreground">Selectively enable or disable advanced AI analytics features for this camera.</p>
+                    </div>
+
+                    {activeCamera ? (
+                      <div className="space-y-3.5 bg-background/50 border border-border/85 rounded-2xl p-4 shadow-inner">
+                        {/* 1. Human Detection & Tracking */}
+                        <div className="flex justify-between items-center py-2 border-b border-border/40 last:border-0">
+                          <div className="space-y-0.5">
+                            <div className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                              <span>👤</span> Human Detection & Tracking
+                            </div>
+                            <div className="text-[10px] text-muted-foreground leading-normal max-w-[280px] sm:max-w-sm">
+                              Detect and track individuals in the camera view field.
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => toggleCameraFeature('humanDetection', activeCamera.humanDetection !== false)}
+                            className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                              activeCamera.humanDetection !== false ? 'bg-brand-gold' : 'bg-muted'
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                activeCamera.humanDetection !== false ? 'translate-x-5' : 'translate-x-0'
+                              }`}
+                            />
+                          </button>
+                        </div>
+
+                        {/* 2. Zone Monitoring */}
+                        <div className="flex justify-between items-center py-2 border-b border-border/40 last:border-0">
+                          <div className="space-y-0.5">
+                            <div className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                              <span>🚧</span> Zone Monitoring
+                            </div>
+                            <div className="text-[10px] text-muted-foreground leading-normal max-w-[280px] sm:max-w-sm">
+                              Alert on unauthorized presence inside marked restricted zones.
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => toggleCameraFeature('zoneMonitoring', activeCamera.zoneMonitoring !== false)}
+                            className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                              activeCamera.zoneMonitoring !== false ? 'bg-brand-gold' : 'bg-muted'
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                activeCamera.zoneMonitoring !== false ? 'translate-x-5' : 'translate-x-0'
+                              }`}
+                            />
+                          </button>
+                        </div>
+
+                        {/* 3. After-Hours Security */}
+                        <div className="flex justify-between items-center py-2 border-b border-border/40 last:border-0">
+                          <div className="space-y-0.5">
+                            <div className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                              <span>🌙</span> After-Hours Security
+                            </div>
+                            <div className="text-[10px] text-muted-foreground leading-normal max-w-[280px] sm:max-w-sm">
+                              Detect people during non-operational business hours automatically.
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => toggleCameraFeature('afterHoursSecurity', activeCamera.afterHoursSecurity !== false)}
+                            className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                              activeCamera.afterHoursSecurity !== false ? 'bg-brand-gold' : 'bg-muted'
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                activeCamera.afterHoursSecurity !== false ? 'translate-x-5' : 'translate-x-0'
+                              }`}
+                            />
+                          </button>
+                        </div>
+
+                        {/* 4. Suspicious Movement */}
+                        <div className="flex justify-between items-center py-2 border-b border-border/40 last:border-0">
+                          <div className="space-y-0.5">
+                            <div className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                              <span>🔄</span> Suspicious Movement Detection
+                            </div>
+                            <div className="text-[10px] text-muted-foreground leading-normal max-w-[280px] sm:max-w-sm">
+                              Identify loitering, pacing, and back-and-forth patterns.
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => toggleCameraFeature('suspiciousMovement', activeCamera.suspiciousMovement !== false)}
+                            className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                              activeCamera.suspiciousMovement !== false ? 'bg-brand-gold' : 'bg-muted'
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                activeCamera.suspiciousMovement !== false ? 'translate-x-5' : 'translate-x-0'
+                              }`}
+                            />
+                          </button>
+                        </div>
+
+                        {/* 5. Camera Health & Tampering */}
+                        <div className="flex justify-between items-center py-2 border-b border-border/40 last:border-0">
+                          <div className="space-y-0.5">
+                            <div className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                              <span>📹</span> Camera Health & Tampering Detection
+                            </div>
+                            <div className="text-[10px] text-muted-foreground leading-normal max-w-[280px] sm:max-w-sm">
+                              Notify when camera is offline, video freezes, is blocked, or orientation shifts.
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => toggleCameraFeature('cameraHealth', activeCamera.cameraHealth !== false)}
+                            className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                              activeCamera.cameraHealth !== false ? 'bg-brand-gold' : 'bg-muted'
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                activeCamera.cameraHealth !== false ? 'translate-x-5' : 'translate-x-0'
+                              }`}
+                            />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-xs text-muted-foreground">Select a camera to configure settings.</div>
                     )}
                   </div>
                 </div>
@@ -1756,6 +3654,565 @@ function DashboardContent() {
           )}
         </main>
       </div>
+
+      {/* ========================================================================= */}
+      {/* 1. CAMERA VIEW MODAL (PREVIEW & SPECS) */}
+      {/* ========================================================================= */}
+      {selectedViewCamera && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fadeIn">
+          <div className="relative w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-card border border-border rounded-2xl shadow-2xl p-6 space-y-6">
+            
+            {/* Modal Header */}
+            <div className="flex justify-between items-start pb-4 border-b border-border">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2.5">
+                  <h2 className="text-lg font-bold text-foreground">
+                    {selectedViewCamera.name || selectedViewCamera.locationName || 'Camera Feed'}
+                  </h2>
+                  <span className="font-mono text-[10px] px-2 py-0.5 rounded font-bold bg-brand-blue/20 text-brand-blue dark:text-brand-light-blue border border-brand-blue/30">
+                    {selectedViewCamera.cameraKey}
+                  </span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    LIVE STREAM
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  📍 {selectedViewCamera.locationName || 'Main Area'} · {selectedViewCamera.manufacturer || 'Hikvision'} {selectedViewCamera.cameraModel || ''}
+                </p>
+              </div>
+
+              <button
+                onClick={() => setSelectedViewCamera(null)}
+                className="p-1.5 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                title="Close modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Video Player */}
+            <div className="relative aspect-video w-full bg-[#020415] rounded-xl border border-border overflow-hidden shadow-inner group select-none">
+              {/* Scanline & Grid Effect */}
+              <div className="absolute inset-0 pointer-events-none z-10 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[size:100%_4px,3px_100%] opacity-35"></div>
+              <div className="absolute inset-0 pointer-events-none z-10 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,0.5)_100%)]"></div>
+
+              {/* Top Left HUD */}
+              <div className="absolute top-3 left-3 font-mono text-[9px] text-zinc-300 bg-[#0A0B0E]/85 border border-[#16171D] px-2.5 py-1.5 rounded-lg z-20 space-y-0.5 shadow-lg">
+                <div className="flex items-center gap-1.5 font-bold text-zinc-100">
+                  <span className="w-2 h-2 bg-red-600 rounded-full animate-pulse"></span>
+                  <span>{(selectedViewCamera.locationName || selectedViewCamera.name || 'CAM').toUpperCase()}</span>
+                </div>
+                <div>1920 × 1080 @ 10FPS · H.264 MJPEG</div>
+                <div className="text-emerald-400 font-bold">AI ACTIVE ENGINE</div>
+              </div>
+
+              {/* Stream Image */}
+              <img
+                src={`http://localhost:8000/api/camera/stream/${selectedViewCamera.cameraKey}`}
+                alt={selectedViewCamera.name || "Live Stream"}
+                className="w-full h-full object-contain relative z-0"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = "/camera_feed_mock.jpg";
+                }}
+              />
+            </div>
+
+            {/* Technical Specs & AI Modules Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              
+              {/* Box 1: Network & Connection Params */}
+              <div className="p-4 rounded-xl border border-border bg-background/50 space-y-2.5 text-xs">
+                <div className="font-bold text-foreground flex items-center gap-1.5 border-b border-border pb-1.5">
+                  <Activity className="w-4 h-4 text-brand-blue" />
+                  <span>Connection & Hardware Details</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <div>
+                    <span className="text-muted-foreground block text-[10px]">IP & PORT</span>
+                    <span className="font-mono font-bold text-foreground">
+                      {selectedViewCamera.ipAddress ? `${selectedViewCamera.ipAddress}:${selectedViewCamera.port || 554}` : 'Default / Auto'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block text-[10px]">MANUFACTURER</span>
+                    <span className="font-semibold text-foreground">{selectedViewCamera.manufacturer || 'Hikvision'}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block text-[10px]">HARDWARE MODEL</span>
+                    <span className="font-semibold text-foreground">{selectedViewCamera.cameraModel || 'Standard IP Camera'}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block text-[10px]">STREAM ENCODING</span>
+                    <span className="font-mono text-foreground">H.264 RTSP Stream</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground block text-[10px]">RTSP ENDPOINT</span>
+                    <span className="font-mono text-[10px] text-brand-gold break-all">
+                      {selectedViewCamera.rtspUrl || 'rtsp://user:pass@camera-ip:554/stream1'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Box 2: AI Safety Policy Toggles */}
+              <div className="p-4 rounded-xl border border-border bg-background/50 space-y-2.5 text-xs">
+                <div className="font-bold text-foreground flex items-center gap-1.5 border-b border-border pb-1.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                  <span>Active AI Safety Modules</span>
+                </div>
+                <div className="space-y-2 text-[11px]">
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">PPE & Helmet Detection</span>
+                    <span className={`px-2 py-0.5 rounded font-bold text-[10px] ${selectedViewCamera.humanDetection !== false ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-muted text-muted-foreground'}`}>
+                      {selectedViewCamera.humanDetection !== false ? '✓ Enabled' : 'Disabled'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">Zone Intrusion Monitoring</span>
+                    <span className={`px-2 py-0.5 rounded font-bold text-[10px] ${selectedViewCamera.zoneMonitoring !== false ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-muted text-muted-foreground'}`}>
+                      {selectedViewCamera.zoneMonitoring !== false ? '✓ Enabled' : 'Disabled'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">After-Hours Perimeter Guard</span>
+                    <span className={`px-2 py-0.5 rounded font-bold text-[10px] ${selectedViewCamera.afterHoursSecurity !== false ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-muted text-muted-foreground'}`}>
+                      {selectedViewCamera.afterHoursSecurity !== false ? '✓ Enabled' : 'Disabled'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">Suspicious Motion Gate</span>
+                    <span className={`px-2 py-0.5 rounded font-bold text-[10px] ${selectedViewCamera.suspiciousMovement !== false ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-muted text-muted-foreground'}`}>
+                      {selectedViewCamera.suspiciousMovement !== false ? '✓ Enabled' : 'Disabled'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Modal Bottom Actions */}
+            <div className="flex flex-wrap justify-between items-center gap-3 pt-4 border-t border-border">
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    const key = selectedViewCamera.cameraKey;
+                    setSelectedViewCamera(null);
+                    setActiveCameraKey(key);
+                    setActiveTab('live_camera');
+                    router.push('/dashboard?tab=live_camera');
+                  }}
+                  className="px-4 py-2 rounded-xl bg-brand-blue hover:bg-brand-blue/90 text-white font-bold text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-brand-blue/15"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  <span>Open in Multi-Grid</span>
+                </button>
+                <button
+                  onClick={() => {
+                    const cam = selectedViewCamera;
+                    setSelectedViewCamera(null);
+                    openSettingsModal(cam);
+                  }}
+                  className="px-4 py-2 rounded-xl border border-border hover:bg-muted text-foreground font-bold text-xs transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <Settings className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Edit / Configure Rules</span>
+                </button>
+              </div>
+
+              <button
+                onClick={() => setSelectedViewCamera(null)}
+                className="px-4 py-2 rounded-xl border border-border hover:bg-muted text-muted-foreground font-semibold text-xs transition-all cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 2. CAMERA SETTINGS & EDIT MODAL */}
+      {/* ========================================================================= */}
+      {selectedSettingsCamera && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fadeIn">
+          <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-card border border-border rounded-2xl shadow-2xl p-6 space-y-6">
+            
+            {/* Modal Header */}
+            <div className="flex justify-between items-start pb-4 border-b border-border">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2.5">
+                  <h2 className="text-lg font-bold text-foreground">
+                    Camera Settings: {selectedSettingsCamera.name || selectedSettingsCamera.locationName || 'Camera'}
+                  </h2>
+                  <span className="font-mono text-[10px] px-2 py-0.5 rounded font-bold bg-muted text-foreground/80 border border-border">
+                    {selectedSettingsCamera.cameraKey}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Manage safety analytics rules and device credentials for this CCTV node.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setSelectedSettingsCamera(null)}
+                className="p-1.5 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                title="Close modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Alert Messages */}
+            {settingsSuccessMsg && (
+              <div className="p-3.5 rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold flex items-center gap-2 animate-fadeIn">
+                <CheckCircle className="w-4 h-4 shrink-0" />
+                <span>{settingsSuccessMsg}</span>
+              </div>
+            )}
+            {settingsErrorMsg && (
+              <div className="p-3.5 rounded-xl border border-red-500/20 bg-red-500/10 text-red-600 dark:text-red-400 text-xs font-bold flex items-center gap-2 animate-fadeIn">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{settingsErrorMsg}</span>
+              </div>
+            )}
+
+            {/* Tab Switcher */}
+            <div className="flex rounded-xl bg-muted/60 p-1 border border-border">
+              <button
+                onClick={() => setSettingsTab('ai')}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                  settingsTab === 'ai'
+                    ? 'bg-card text-foreground shadow-sm border border-border'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                <span>AI & Safety Rules</span>
+              </button>
+              <button
+                onClick={() => setSettingsTab('device')}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                  settingsTab === 'device'
+                    ? 'bg-card text-foreground shadow-sm border border-border'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Sliders className="w-4 h-4 text-brand-blue" />
+                <span>Device & Network (Edit)</span>
+              </button>
+            </div>
+
+            {/* TAB 1: AI & Safety Rules */}
+            {settingsTab === 'ai' && (
+              <div className="space-y-4">
+                <div className="space-y-3 divide-y divide-border/50">
+                  
+                  {/* Toggle 1: PPE & Helmet */}
+                  <div className="flex justify-between items-center pt-2">
+                    <div className="space-y-0.5 pr-4">
+                      <div className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                        <span>👷</span> PPE & Helmet Detection
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        Detect missing hardhats and safety gear in active work zones.
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleToggleModalFeature('humanDetection', selectedSettingsCamera.humanDetection !== false)}
+                      className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        selectedSettingsCamera.humanDetection !== false ? 'bg-brand-blue' : 'bg-muted'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          selectedSettingsCamera.humanDetection !== false ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Toggle 2: Zone Monitoring */}
+                  <div className="flex justify-between items-center pt-3">
+                    <div className="space-y-0.5 pr-4">
+                      <div className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                        <span>🚧</span> Security Zone Perimeter
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        Alert immediately when workers cross into restricted hazard boundaries.
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleToggleModalFeature('zoneMonitoring', selectedSettingsCamera.zoneMonitoring !== false)}
+                      className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        selectedSettingsCamera.zoneMonitoring !== false ? 'bg-brand-blue' : 'bg-muted'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          selectedSettingsCamera.zoneMonitoring !== false ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Toggle 3: After-Hours Security */}
+                  <div className="flex justify-between items-center pt-3">
+                    <div className="space-y-0.5 pr-4">
+                      <div className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                        <span>🌙</span> After-Hours Security Mode
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        High-sensitivity perimeter tracking outside operational shifts.
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleToggleModalFeature('afterHoursSecurity', selectedSettingsCamera.afterHoursSecurity !== false)}
+                      className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        selectedSettingsCamera.afterHoursSecurity !== false ? 'bg-brand-blue' : 'bg-muted'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          selectedSettingsCamera.afterHoursSecurity !== false ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Toggle 4: Suspicious Motion */}
+                  <div className="flex justify-between items-center pt-3">
+                    <div className="space-y-0.5 pr-4">
+                      <div className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                        <span>🔄</span> Suspicious Movement & Loitering
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        Filter false positives and flag prolonged loitering near key assets.
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleToggleModalFeature('suspiciousMovement', selectedSettingsCamera.suspiciousMovement !== false)}
+                      className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        selectedSettingsCamera.suspiciousMovement !== false ? 'bg-brand-blue' : 'bg-muted'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          selectedSettingsCamera.suspiciousMovement !== false ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Toggle 5: Camera Health */}
+                  <div className="flex justify-between items-center pt-3">
+                    <div className="space-y-0.5 pr-4">
+                      <div className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                        <span>📹</span> Camera Stream Health Heartbeat
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        Auto-alert if video stream disconnects, freezes, or encounters packet drop.
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleToggleModalFeature('cameraHealth', selectedSettingsCamera.cameraHealth !== false)}
+                      className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        selectedSettingsCamera.cameraHealth !== false ? 'bg-brand-blue' : 'bg-muted'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          selectedSettingsCamera.cameraHealth !== false ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                </div>
+
+                {/* Zone Calibration Banner */}
+                <div className="p-4 rounded-xl border border-brand-blue/20 bg-brand-blue/5 flex items-center justify-between mt-4">
+                  <div className="space-y-0.5">
+                    <div className="text-xs font-bold text-foreground">Configure Detection Zones</div>
+                    <p className="text-[10px] text-muted-foreground">Draw and customize safety perimeter polygons on this camera feed.</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const key = selectedSettingsCamera.cameraKey;
+                      setSelectedSettingsCamera(null);
+                      setActiveCameraKey(key);
+                      setActiveTab('zones');
+                      router.push('/dashboard?tab=zones');
+                    }}
+                    className="px-3 py-1.5 text-xs font-bold rounded-lg bg-brand-blue text-white hover:bg-brand-blue/90 transition-all cursor-pointer shrink-0"
+                  >
+                    Open Zones →
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 2: Device & Network (Edit) */}
+            {settingsTab === 'device' && (
+              <form onSubmit={handleSaveDeviceSettings} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  
+                  {/* Camera Name */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-muted-foreground block">Camera Name</label>
+                    <input
+                      type="text"
+                      value={editForm.name}
+                      onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                      placeholder="Main Entrance Cam"
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-blue"
+                    />
+                  </div>
+
+                  {/* Location Name */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-muted-foreground block">Location / Area</label>
+                    <input
+                      type="text"
+                      value={editForm.locationName}
+                      onChange={(e) => setEditForm({ ...editForm, locationName: e.target.value })}
+                      placeholder="Workshop Floor 1"
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-blue"
+                    />
+                  </div>
+
+                  {/* IP Address */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-muted-foreground block">IP Address</label>
+                    <input
+                      type="text"
+                      value={editForm.ipAddress}
+                      onChange={(e) => setEditForm({ ...editForm, ipAddress: e.target.value })}
+                      placeholder="192.168.1.100"
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-xs font-mono focus:outline-none focus:ring-1 focus:ring-brand-blue"
+                    />
+                  </div>
+
+                  {/* Port */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-muted-foreground block">Port</label>
+                    <input
+                      type="number"
+                      value={editForm.port}
+                      onChange={(e) => setEditForm({ ...editForm, port: e.target.value })}
+                      placeholder="554"
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-xs font-mono focus:outline-none focus:ring-1 focus:ring-brand-blue"
+                    />
+                  </div>
+
+                  {/* Username */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-muted-foreground block">Username</label>
+                    <input
+                      type="text"
+                      value={editForm.username}
+                      onChange={(e) => setEditForm({ ...editForm, username: e.target.value })}
+                      placeholder="admin"
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-blue"
+                    />
+                  </div>
+
+                  {/* Password */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-muted-foreground block">New Password (Optional)</label>
+                    <input
+                      type="password"
+                      value={editForm.password}
+                      onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
+                      placeholder="Leave blank to keep unchanged"
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-blue"
+                    />
+                  </div>
+
+                  {/* RTSP URL */}
+                  <div className="space-y-1.5 md:col-span-2">
+                    <label className="text-xs font-bold text-muted-foreground block">RTSP Stream URL</label>
+                    <input
+                      type="text"
+                      value={editForm.rtspUrl}
+                      onChange={(e) => setEditForm({ ...editForm, rtspUrl: e.target.value })}
+                      placeholder="rtsp://user:password@ip:port/stream1"
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-xs font-mono focus:outline-none focus:ring-1 focus:ring-brand-blue"
+                    />
+                  </div>
+
+                  {/* Manufacturer */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-muted-foreground block">Manufacturer</label>
+                    <select
+                      value={editForm.manufacturer}
+                      onChange={(e) => setEditForm({ ...editForm, manufacturer: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-brand-blue cursor-pointer"
+                    >
+                      <option value="Hikvision">Hikvision</option>
+                      <option value="Dahua">Dahua</option>
+                      <option value="Axis">Axis</option>
+                      <option value="CP Plus">CP Plus</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+
+                  {/* Camera Model */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-muted-foreground block">Camera Model</label>
+                    <input
+                      type="text"
+                      value={editForm.cameraModel}
+                      onChange={(e) => setEditForm({ ...editForm, cameraModel: e.target.value })}
+                      placeholder="DS-2CD2143G0-I"
+                      className="w-full px-3 py-2 rounded-xl border border-border bg-background text-foreground text-xs font-medium focus:outline-none focus:ring-1 focus:ring-brand-blue"
+                    />
+                  </div>
+
+                </div>
+
+                <div className="flex justify-end gap-3 pt-4 border-t border-border">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSettingsCamera(null)}
+                    className="px-4 py-2 rounded-xl border border-border hover:bg-muted text-muted-foreground font-semibold text-xs transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingDeviceSettings}
+                    className="px-5 py-2 rounded-xl bg-brand-blue hover:bg-brand-blue/90 text-white font-bold text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-brand-blue/15 disabled:opacity-50"
+                  >
+                    {isSavingDeviceSettings ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <span>Save Changes</span>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Modal Bottom Close Button for AI tab */}
+            {settingsTab === 'ai' && (
+              <div className="flex justify-end pt-3 border-t border-border">
+                <button
+                  onClick={() => setSelectedSettingsCamera(null)}
+                  className="px-4 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground font-bold text-xs transition-all cursor-pointer"
+                >
+                  Done
+                </button>
+              </div>
+            )}
+
+          </div>
+        </div>
+      )}
 
     </div>
   );
