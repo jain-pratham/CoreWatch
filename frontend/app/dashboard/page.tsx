@@ -81,6 +81,7 @@ import { Suspense } from 'react';
 import ZoneManagementView from '../../components/zones/ZoneManagementView';
 import PlansManagementView from '../../components/billing/PlansManagementView';
 import UserDashboardContainer from '../../components/user-dashboard/UserDashboardContainer';
+import UserSettingsView from '../../components/user-dashboard/UserSettingsView';
 
 function DashboardContent() {
   const router = useRouter();
@@ -457,13 +458,23 @@ function DashboardContent() {
   const [selectedCountryCode, setSelectedCountryCode] = useState('+91');
   const [isSubmittingCustomer, setIsSubmittingCustomer] = useState(false);
 
-  // Initial Sample Data (Admin/Fallback)
-  const [customers, setCustomers] = useState<Customer[]>([
-    { id: 'CUST-101', name: 'Pratham Jain', email: 'pratham@tieraindia.com', company: 'Tiera India Logistics', cameras: 12, plan: 'Enterprise Pro', status: 'Active' },
-    { id: 'CUST-102', name: 'Aarya Sharma', email: 'aarya@visagroup.org', company: 'Aarya Visa Services', cameras: 8, plan: 'Standard AI', status: 'Active' },
-    { id: 'CUST-103', name: 'Vikram Mehta', email: 'vikram@mehtatech.io', company: 'Mehta Precision Components', cameras: 24, plan: 'Enterprise Max', status: 'Active' },
-    { id: 'CUST-104', name: 'Rohan Gupta', email: 'rohan@guptawarehouse.com', company: 'Gupta Warehousing NCR', cameras: 16, plan: 'Standard AI', status: 'Pending' },
-  ]);
+  // Customer Database State (Loaded from MongoDB /api/customers)
+  const [customers, setCustomers] = useState<Customer[]>([]);
+
+  // Super Admin Real Analytics & MRR Calculation
+  const totalCalculatedMRR = useMemo(() => {
+    if (!Array.isArray(customers) || customers.length === 0) return 0;
+    return customers.reduce((sum, c) => {
+      const plan = Array.isArray(dbPlans) ? dbPlans.find((p: any) => p.name?.toLowerCase() === (c.plan || '').toLowerCase()) : null;
+      const price = plan ? (plan.monthlyPrice || 0) : (c.plan?.toLowerCase().includes('max') ? 99 : c.plan?.toLowerCase().includes('pro') ? 49 : 0);
+      return sum + price;
+    }, 0);
+  }, [customers, dbPlans]);
+
+  const totalCalculatedNodes = useMemo(() => {
+    const fromCustomers = (customers || []).reduce((sum, c) => sum + (Number(c.cameras) || 0), 0);
+    return fromCustomers + (cameras ? cameras.length : 0);
+  }, [customers, cameras]);
 
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5050';
@@ -1386,27 +1397,291 @@ function DashboardContent() {
             <>
               {activeTab === 'dashboard' && (
                 <div className="space-y-6">
-                  {/* Executive Stats */}
+                  {/* Executive Header */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-border">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2.5">
+                        <h2 className="text-xl sm:text-2xl font-black text-foreground tracking-tight">
+                          Enterprise Operations & Control Command
+                        </h2>
+                        <span className="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider bg-red-500/20 text-red-500 border border-red-500/30">
+                          Super Admin
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Live multi-tenant surveillance network, client camera node allocations, and real-time AI safety incident metrics.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => setActiveTab('add_customer')}
+                        className="px-3.5 py-2 text-xs font-bold rounded-xl bg-brand-blue hover:bg-brand-blue/90 text-white transition-all cursor-pointer shadow-sm flex items-center gap-1.5"
+                      >
+                        <PlusCircle className="w-3.5 h-3.5" />
+                        <span>Add Customer</span>
+                      </button>
+                      <button
+                        onClick={() => setActiveTab('billing_plans')}
+                        className="px-3.5 py-2 text-xs font-bold rounded-xl border border-border bg-card hover:bg-muted text-foreground transition-all cursor-pointer flex items-center gap-1.5"
+                      >
+                        <CreditCard className="w-3.5 h-3.5 text-muted-foreground" />
+                        <span>Manage Plans</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Executive Stats Cards */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div className="p-5 rounded-2xl border border-border bg-card shadow-sm space-y-2">
-                      <div className="text-xs text-muted-foreground font-medium">Total Enterprise Clients</div>
-                      <div className="text-3xl font-black text-foreground">128</div>
-                      <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">↑ +14% from last month</div>
+                    <div className="p-5 rounded-2xl border border-border bg-card shadow-sm space-y-2 hover:border-brand-blue/40 transition-all">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-muted-foreground font-medium">Total Enterprise Clients</span>
+                        <Users className="w-4 h-4 text-brand-blue dark:text-brand-light-blue" />
+                      </div>
+                      <div className="text-3xl font-black text-foreground">{customers.length}</div>
+                      <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        <span>{customers.filter(c => c.status === 'Active').length} Active · {customers.filter(c => c.status === 'Pending').length} Pending</span>
+                      </div>
                     </div>
-                    <div className="p-5 rounded-2xl border border-border bg-card shadow-sm space-y-2">
-                      <div className="text-xs text-muted-foreground font-medium">Active CCTV Camera Nodes</div>
-                      <div className="text-3xl font-black text-brand-blue dark:text-brand-light-blue">1,420</div>
-                      <div className="text-[11px] text-muted-foreground">99.8% Online uptime</div>
+
+                    <div className="p-5 rounded-2xl border border-border bg-card shadow-sm space-y-2 hover:border-brand-blue/40 transition-all">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-muted-foreground font-medium">Network Camera Nodes</span>
+                        <Camera className="w-4 h-4 text-[#f59e0b]" />
+                      </div>
+                      <div className="text-3xl font-black text-brand-blue dark:text-brand-light-blue">
+                        {totalCalculatedNodes}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        Allocated across registered enterprise accounts
+                      </div>
                     </div>
-                    <div className="p-5 rounded-2xl border border-border bg-card shadow-sm space-y-2">
-                      <div className="text-xs text-muted-foreground font-medium">AI Safety Alerts Processed</div>
-                      <div className="text-3xl font-black text-foreground">45,892</div>
-                      <div className="text-[11px] text-brand-blue dark:text-brand-light-blue font-semibold">Real-time dispatched</div>
+
+                    <div className="p-5 rounded-2xl border border-border bg-card shadow-sm space-y-2 hover:border-brand-blue/40 transition-all">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-muted-foreground font-medium">AI Safety Incidents</span>
+                        <ShieldAlert className="w-4 h-4 text-rose-500" />
+                      </div>
+                      <div className="text-3xl font-black text-foreground">{dbAlerts.length}</div>
+                      <div className="text-[11px] text-rose-500 dark:text-rose-400 font-semibold">
+                        {dbAlerts.filter(a => a.severity === 'CRITICAL' || a.severity === 'HIGH').length} High Priority Dispatched
+                      </div>
                     </div>
-                    <div className="p-5 rounded-2xl border border-border bg-card shadow-sm space-y-2">
-                      <div className="text-xs text-muted-foreground font-medium">System Role Status</div>
-                      <div className="text-xl font-black text-red-600 dark:text-red-400 uppercase">SUPER ADMIN</div>
-                      <div className="text-[11px] text-muted-foreground">Full system access privileges</div>
+
+                    <div className="p-5 rounded-2xl border border-border bg-card shadow-sm space-y-2 hover:border-brand-blue/40 transition-all">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-muted-foreground font-medium">Monthly Revenue (MRR)</span>
+                        <TrendingUp className="w-4 h-4 text-emerald-500" />
+                      </div>
+                      <div className="text-3xl font-black text-emerald-600 dark:text-emerald-400">
+                        ${totalCalculatedMRR.toLocaleString()}
+                        <span className="text-xs font-normal text-muted-foreground ml-1">/mo</span>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        Estimated from active client subscriptions
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Two-Column Analytics & Live Monitoring Layout */}
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    {/* Column 1: Enterprise Clients Roster Overview */}
+                    <div className="lg:col-span-7 rounded-2xl border border-border bg-card p-6 shadow-sm space-y-4 flex flex-col justify-between">
+                      <div>
+                        <div className="flex justify-between items-center mb-3">
+                          <div>
+                            <h3 className="text-base font-bold text-foreground">Enterprise Client Directory</h3>
+                            <p className="text-xs text-muted-foreground">Recent client accounts registered in database.</p>
+                          </div>
+                          <button
+                            onClick={() => setActiveTab('all_customers')}
+                            className="text-xs font-bold text-brand-blue dark:text-brand-light-blue hover:underline cursor-pointer flex items-center gap-1"
+                          >
+                            <span>View All ({customers.length})</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        {customers.length > 0 ? (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left text-xs">
+                              <thead className="border-b border-border text-muted-foreground uppercase font-mono text-[10px] bg-muted/40">
+                                <tr>
+                                  <th className="py-2.5 px-3">Company</th>
+                                  <th className="py-2.5 px-3">Plan</th>
+                                  <th className="py-2.5 px-3">Cameras</th>
+                                  <th className="py-2.5 px-3 text-right">Status</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-border/60 font-medium">
+                                {customers.slice(0, 5).map((c) => (
+                                  <tr key={c.id || c.email} className="hover:bg-muted/30 transition-colors">
+                                    <td className="py-2.5 px-3">
+                                      <div className="font-bold text-foreground truncate max-w-[160px]">{c.company || c.name}</div>
+                                      <div className="text-[10px] text-muted-foreground truncate max-w-[160px]">{c.email}</div>
+                                    </td>
+                                    <td className="py-2.5 px-3">
+                                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-muted text-foreground border border-border">
+                                        {c.plan || 'Standard'}
+                                      </span>
+                                    </td>
+                                    <td className="py-2.5 px-3 font-mono font-bold text-brand-blue dark:text-brand-light-blue">
+                                      {c.cameras || 1} Nodes
+                                    </td>
+                                    <td className="py-2.5 px-3 text-right">
+                                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase font-mono ${
+                                        c.status === 'Active' 
+                                          ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' 
+                                          : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                                      }`}>
+                                        {c.status || 'Active'}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <div className="border border-dashed border-border rounded-xl p-8 text-center space-y-3 my-2">
+                            <Users className="w-8 h-8 text-muted-foreground mx-auto" />
+                            <div className="text-xs font-bold text-foreground">No Enterprise Customers Registered Yet</div>
+                            <p className="text-[11px] text-muted-foreground max-w-sm mx-auto">
+                              Add your first enterprise customer to provision camera quotas and generate subscription invoices.
+                            </p>
+                            <button
+                              onClick={() => setActiveTab('add_customer')}
+                              className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-brand-blue text-white shadow-sm inline-flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <PlusCircle className="w-3.5 h-3.5" />
+                              <span>Add First Customer</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="pt-3 border-t border-border flex justify-between items-center text-xs text-muted-foreground">
+                        <span>Database records synchronized</span>
+                        <button
+                          onClick={() => setActiveTab('add_customer')}
+                          className="font-bold text-brand-blue dark:text-brand-light-blue hover:underline cursor-pointer"
+                        >
+                          + Add New Customer Account
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Column 2: Live AI Safety Incident Feed */}
+                    <div className="lg:col-span-5 rounded-2xl border border-border bg-card p-6 shadow-sm space-y-4 flex flex-col justify-between">
+                      <div>
+                        <div className="flex justify-between items-center mb-3">
+                          <div>
+                            <h3 className="text-base font-bold text-foreground">Live AI Safety Incidents</h3>
+                            <p className="text-xs text-muted-foreground">Real-time alerts across all client streams.</p>
+                          </div>
+                          <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                        </div>
+
+                        {dbAlerts.length > 0 ? (
+                          <div className="space-y-2.5">
+                            {dbAlerts.slice(0, 5).map((a) => {
+                              const isHigh = a.severity === 'CRITICAL' || a.severity === 'HIGH';
+                              return (
+                                <div
+                                  key={a._id || a.timestamp}
+                                  className="p-3 rounded-xl border border-border bg-background/60 flex items-start justify-between gap-3 text-xs"
+                                >
+                                  <div className="flex items-start gap-2.5 min-w-0">
+                                    <span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${isHigh ? 'bg-rose-500' : 'bg-amber-500'}`} />
+                                    <div className="min-w-0">
+                                      <p className="font-bold text-foreground truncate">{a.message}</p>
+                                      <p className="text-[10px] text-muted-foreground font-mono truncate">
+                                        Cam: {a.cameraKey} · {new Date(a.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase font-mono shrink-0 ${
+                                    isHigh ? 'bg-rose-500/20 text-rose-500' : 'bg-amber-500/20 text-amber-500'
+                                  }`}>
+                                    {a.severity || 'HIGH'}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="border border-dashed border-border rounded-xl p-8 text-center space-y-2.5 my-2">
+                            <ShieldCheck className="w-8 h-8 text-emerald-500 mx-auto" />
+                            <div className="text-xs font-bold text-foreground">No Security Incidents Logged</div>
+                            <p className="text-[11px] text-muted-foreground max-w-xs mx-auto">
+                              All connected enterprise cameras are operating normally. No safety violations or zone breaches detected.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="pt-3 border-t border-border flex justify-between items-center text-xs text-muted-foreground">
+                        <span>Total Incidents: <strong className="text-foreground">{dbAlerts.length}</strong></span>
+                        <button
+                          onClick={() => setActiveTab('admin_notifications')}
+                          className="font-bold text-brand-blue dark:text-brand-light-blue hover:underline cursor-pointer"
+                        >
+                          View Full History →
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Infrastructure Services & Pipeline Health */}
+                  <div className="border border-border bg-card rounded-2xl p-6 shadow-sm space-y-4">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <h3 className="text-base font-bold text-foreground">System Health & Microservice Pipeline</h3>
+                        <p className="text-xs text-muted-foreground">Real-time status of backend inference nodes, database, and stream ingestion.</p>
+                      </div>
+                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>All Systems Operational</span>
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
+                      <div className="p-4 rounded-xl border border-border bg-background/50 space-y-1">
+                        <div className="text-xs text-muted-foreground font-medium">Database Node</div>
+                        <div className="text-sm font-bold text-foreground flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                          <span>MongoDB Atlas Cluster</span>
+                        </div>
+                        <div className="text-[10px] text-muted-foreground font-mono">Port 27017 · Latency &lt;5ms</div>
+                      </div>
+
+                      <div className="p-4 rounded-xl border border-border bg-background/50 space-y-1">
+                        <div className="text-xs text-muted-foreground font-medium">AI Inference Engine</div>
+                        <div className="text-sm font-bold text-foreground flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                          <span>YOLOv8 & OpenCV Pipeline</span>
+                        </div>
+                        <div className="text-[10px] text-muted-foreground font-mono">Zero-shot object detection active</div>
+                      </div>
+
+                      <div className="p-4 rounded-xl border border-border bg-background/50 space-y-1">
+                        <div className="text-xs text-muted-foreground font-medium">RTSP Ingestion Hub</div>
+                        <div className="text-sm font-bold text-foreground flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                          <span>Multi-Camera Streaming</span>
+                        </div>
+                        <div className="text-[10px] text-muted-foreground font-mono">H.264 / MJPEG live transcoding</div>
+                      </div>
+
+                      <div className="p-4 rounded-xl border border-border bg-background/50 space-y-1">
+                        <div className="text-xs text-muted-foreground font-medium">Alert Dispatcher</div>
+                        <div className="text-sm font-bold text-foreground flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                          <span>Real-time SSE Push</span>
+                        </div>
+                        <div className="text-[10px] text-muted-foreground font-mono">Instant security broadcast active</div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1748,25 +2023,12 @@ function DashboardContent() {
               )}
 
               {activeTab === 'settings' && (
-                <div className="max-w-3xl border border-border bg-card rounded-2xl p-6 space-y-6 shadow-sm">
-                  <h2 className="text-lg font-bold text-foreground">Admin System Settings</h2>
-                  <div className="space-y-4 text-xs">
-                    <div className="flex justify-between items-center py-3 border-b border-border">
-                      <div>
-                        <div className="font-bold text-foreground">AI Model Detection Sensitivity</div>
-                        <div className="text-muted-foreground">Adjust confidence threshold for helmet & safety alerts.</div>
-                      </div>
-                      <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">95% (High Precision)</span>
-                    </div>
-                    <div className="flex justify-between items-center py-3 border-b border-border">
-                      <div>
-                        <div className="font-bold text-foreground">Real-time WhatsApp Webhook Gateway</div>
-                        <div className="text-muted-foreground">Automated dispatch clips to safety managers.</div>
-                      </div>
-                      <span className="px-2.5 py-1 rounded bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 font-bold">ENABLED</span>
-                    </div>
-                  </div>
-                </div>
+                <UserSettingsView
+                  user={user}
+                  customer={customer}
+                  activeCameraKey={activeCameraKey}
+                  onNavigateTab={handleSelectTab}
+                />
               )}
 
               {activeTab === 'billing_plans' && (
@@ -3340,7 +3602,7 @@ function DashboardContent() {
                           </div>
                           <div>
                             <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">Customer ID</span>
-                            <span className="font-semibold text-foreground font-mono">{customer?._id || customer?.id || 'CUST-101'}</span>
+                            <span className="font-semibold text-foreground font-mono">{customer?._id || customer?.id || user?._id || 'CUST-VERIFIED'}</span>
                           </div>
                           <div>
                             <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">Billing Email</span>

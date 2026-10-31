@@ -25,44 +25,18 @@ export default function UserContentManagementView({ dbAlerts }: UserContentManag
   const [severityFilter, setSeverityFilter] = useState<'ALL' | 'HIGH' | 'MEDIUM'>('ALL');
   const [selectedPreview, setSelectedPreview] = useState<any | null>(null);
 
-  const mockGalleryItems = [
-    {
-      id: 'g-1',
-      title: 'Roof Deck Surveillance',
-      camera: 'CAM 07 - ROOF NE',
-      date: '2026-10-25 13:48:15',
-      src: '/uploads/sky.jpg',
-      category: 'Perimeter Observation',
-      resolution: '1920x1080'
-    },
-    {
-      id: 'g-2',
-      title: 'Tower Facade Inspection',
-      camera: 'CAM 04 - TOWER',
-      date: '2026-10-25 14:15:32',
-      src: '/uploads/building.jpg',
-      category: 'Structural Monitoring',
-      resolution: '1920x1080'
-    },
-    {
-      id: 'g-3',
-      title: 'Warehouse Bay 1 & 2',
-      camera: 'CAM 12 - DOCK B12',
-      date: '2026-10-24 14:18:34',
-      src: '/uploads/warehouse.jpg',
-      category: 'Forklift Safety Zone',
-      resolution: '1920x1080'
-    },
-    {
-      id: 'g-4',
-      title: 'Corporate Lobby Entrance',
-      camera: 'CAM 04 - LOBBY',
-      date: '2026-10-24 09:34:12',
-      src: '/uploads/lobby.jpg',
-      category: 'Visitor Access Log',
-      resolution: '1920x1080'
-    }
-  ];
+  const realGalleryItems = (dbAlerts || [])
+    .filter((a: any) => a.imageUrl && typeof a.imageUrl === 'string' && a.imageUrl.trim() !== '')
+    .map((a: any) => ({
+      id: a._id || a.id,
+      title: a.message || 'AI Security Incident',
+      camera: a.cameraKey || 'Camera Feed',
+      date: new Date(a.timestamp).toLocaleString(),
+      src: a.imageUrl,
+      category: a.category || 'Security Breach',
+      resolution: '1920x1080',
+      severity: a.severity || 'HIGH',
+    }));
 
   return (
     <div className="space-y-6 pb-12">
@@ -206,41 +180,55 @@ export default function UserContentManagementView({ dbAlerts }: UserContentManag
       {/* VIEW 2: SNAPSHOT & VIDEO ARCHIVES */}
       {activeTab === 'gallery' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {mockGalleryItems.map((item) => (
-            <div
-              key={item.id}
-              onClick={() => setSelectedPreview(item)}
-              className="group relative rounded-2xl overflow-hidden bg-[#181926] border border-[#27293d] shadow-xl hover:border-orange-500/60 transition-all cursor-pointer flex flex-col"
-            >
-              <div className="relative aspect-video w-full bg-black/60 overflow-hidden">
-                <img
-                  src={item.src}
-                  alt={item.title}
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                />
-                <div className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/70 text-white opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Maximize2 className="w-3.5 h-3.5" />
+          {realGalleryItems.length > 0 ? (
+            realGalleryItems.map((item) => (
+              <div
+                key={item.id}
+                onClick={() => setSelectedPreview(item)}
+                className="group relative rounded-2xl overflow-hidden bg-[#181926] border border-[#27293d] shadow-xl hover:border-orange-500/60 transition-all cursor-pointer flex flex-col"
+              >
+                <div className="relative aspect-video w-full bg-black/60 overflow-hidden">
+                  <img
+                    src={item.src}
+                    alt={item.title}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                  />
+                  <div className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/70 text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Maximize2 className="w-3.5 h-3.5" />
+                  </div>
                 </div>
-              </div>
 
-              <div className="p-4 space-y-1 text-left">
-                <h4 className="text-xs font-bold text-white truncate group-hover:text-orange-400 transition-colors">
-                  {item.title}
-                </h4>
-                <p className="text-[10px] text-slate-400 font-mono truncate">
-                  {item.camera} · {item.date}
-                </p>
-                <div className="pt-2 flex items-center justify-between">
-                  <span className="text-[10px] font-bold text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded-full">
-                    {item.category}
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-mono">
-                    {item.resolution}
-                  </span>
+                <div className="p-4 space-y-1 text-left">
+                  <h4 className="text-xs font-bold text-white truncate group-hover:text-orange-400 transition-colors">
+                    {item.title}
+                  </h4>
+                  <p className="text-[10px] text-slate-400 font-mono truncate">
+                    {item.camera} · {item.date}
+                  </p>
+                  <div className="pt-2 flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded-full">
+                      {item.category}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      {item.resolution}
+                    </span>
+                  </div>
                 </div>
               </div>
+            ))
+          ) : (
+            <div className="col-span-full border border-dashed border-[#2b304c] rounded-2xl p-12 text-center space-y-3">
+              <div className="w-12 h-12 rounded-full bg-[#1e2338] text-slate-400 flex items-center justify-center mx-auto">
+                <ImageIcon className="w-6 h-6 text-slate-400" />
+              </div>
+              <div className="text-sm font-bold text-slate-200">
+                No Incident Gallery Captures Yet
+              </div>
+              <p className="text-xs text-slate-400 max-w-md mx-auto">
+                Visual evidence snapshots are automatically archived here when AI vision models detect unauthorized access or security violations.
+              </p>
             </div>
-          ))}
+          )}
         </div>
       )}
 

@@ -51,16 +51,16 @@ export default function UserProfileView({
   useEffect(() => {
     if (user || customer) {
       setFormData({
-        name: user?.name || 'Test User',
-        email: user?.email || 'test@gmail.com',
-        phone: customer?.phone || '+91 9999999999',
-        company: customer?.company || user?.company || 'CoreWatch Test Enterprise',
-        addressLine1: customer?.addressLine1 || 'Tech Park Tower 4, Floor 6',
-        addressLine2: customer?.addressLine2 || 'Outer Ring Road',
-        city: customer?.city || 'Bengaluru',
-        state: customer?.state || 'Karnataka',
+        name: user?.name || customer?.name || '',
+        email: user?.email || customer?.email || '',
+        phone: customer?.phone || '',
+        company: customer?.company || user?.company || '',
+        addressLine1: customer?.addressLine1 || '',
+        addressLine2: customer?.addressLine2 || '',
+        city: customer?.city || '',
+        state: customer?.state || '',
         country: customer?.country || 'India',
-        pincode: customer?.pincode || '560103',
+        pincode: customer?.pincode || '',
       });
     }
   }, [user, customer]);
@@ -196,20 +196,15 @@ export default function UserProfileView({
             <div className="border border-[#27293d] bg-[#181926] rounded-2xl p-6 shadow-xl space-y-5 text-center sm:text-left">
               <div className="flex flex-col sm:flex-row lg:flex-col items-center sm:items-start lg:items-center gap-4">
                 <div className="relative">
-                  <img
-                    src="/uploads/avatar_asha.jpg"
-                    alt={formData.name || 'User Profile'}
-                    className="w-20 h-20 rounded-2xl object-cover ring-2 ring-orange-500/50 shadow-lg shadow-orange-500/10"
-                    onError={(e) => {
-                      (e.target as HTMLElement).style.display = 'none';
-                    }}
-                  />
+                  <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-600 text-white font-black text-2xl flex items-center justify-center ring-2 ring-orange-500/50 shadow-lg shadow-orange-500/10">
+                    {(formData.name || user?.name || 'User').split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase()}
+                  </div>
                   <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 ring-2 ring-[#181926]" title="Online" />
                 </div>
 
                 <div className="space-y-1 text-center sm:text-left lg:text-center">
                   <h2 className="text-lg font-black text-white tracking-tight">
-                    {formData.name || 'Test User'}
+                    {formData.name || user?.name || 'Enterprise User'}
                   </h2>
                   <p className="text-xs text-slate-400 font-mono">
                     {formData.email}
@@ -301,7 +296,7 @@ export default function UserProfileView({
                     name="name"
                     value={formData.name}
                     onChange={handleChange}
-                    placeholder="e.g. Test User"
+                    placeholder="Enter your full name"
                     className="w-full px-3.5 py-2.5 rounded-xl border border-[#2b2e46] bg-[#121422] text-white text-xs font-medium focus:outline-none focus:border-orange-500 transition-colors"
                   />
                 </div>

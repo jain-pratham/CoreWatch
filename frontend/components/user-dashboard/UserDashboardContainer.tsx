@@ -6,6 +6,7 @@ import UserOverviewView from './UserOverviewView';
 import UserCameraManagementView from './UserCameraManagementView';
 import UserContentManagementView from './UserContentManagementView';
 import UserSettingsView from './UserSettingsView';
+import UserProfileView from './UserProfileView';
 import ZoneManagementView from '../zones/ZoneManagementView';
 import UserBillingSubscriptionView from './UserBillingSubscriptionView';
 import CustomConfirmDialog from '../common/CustomConfirmDialog';
@@ -292,8 +293,12 @@ export default function UserDashboardContainer({
         {activeTab === 'dashboard' && (
           <UserOverviewView
             user={user}
+            customer={customer}
             cameras={cameras}
             dbAlerts={dbAlerts}
+            dbPlans={dbPlans}
+            isTrialUser={isTrialUser}
+            maxAllowedCameras={maxAllowedCameras}
             onNavigateTab={setActiveTab}
             onOpenAddCamera={() => setAddCameraModalOpen(true)}
             onOpenInviteUser={() => setInviteUserModalOpen(true)}
@@ -415,17 +420,26 @@ export default function UserDashboardContainer({
         )}
 
         {/* ========================================================================= */}
-        {/* 8. PROFILE & SETTINGS */}
+        {/* 8. PROFILE VIEW */}
         {/* ========================================================================= */}
-        {(activeTab === 'profile' || activeTab === 'settings') && (
+        {activeTab === 'profile' && (
+          <UserProfileView
+            user={user}
+            customer={customer}
+          />
+        )}
+
+        {/* ========================================================================= */}
+        {/* 9. SYSTEM SETTINGS */}
+        {/* ========================================================================= */}
+        {activeTab === 'settings' && (
           <UserSettingsView
             user={user}
             customer={customer}
             activeCameraKey={activeCameraKey}
             isTrialUser={isTrialUser}
             maxAllowedCameras={maxAllowedCameras}
-            dbInvoices={dbInvoices}
-            onUpgradePlan={() => setActiveTab('subscription_detail')}
+            onNavigateTab={setActiveTab}
           />
         )}
 
