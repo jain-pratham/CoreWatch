@@ -74,6 +74,7 @@ const NAVIGATION_ITEMS: NavItem[] = [
   { label: 'Notification', href: '/dashboard?tab=notification', icon: Bell, roles: ['user'] },
   { label: 'Demo Overview', href: '/dashboard?tab=demo_overview', icon: Eye, roles: ['demo'] },
   { label: 'Upgrade Account', href: '/dashboard?tab=upgrade_account', icon: ArrowUpCircle, roles: ['demo'] },
+  { label: 'Cloud Storage', href: '/dashboard?tab=integrations', icon: HardDrive, roles: ['user', 'admin'] },
   { label: 'Settings', href: '/dashboard?tab=settings', icon: Settings, roles: ['admin', 'user'] },
 ];
 
@@ -82,6 +83,7 @@ import ZoneManagementView from '../../components/zones/ZoneManagementView';
 import PlansManagementView from '../../components/billing/PlansManagementView';
 import UserDashboardContainer from '../../components/user-dashboard/UserDashboardContainer';
 import UserSettingsView from '../../components/user-dashboard/UserSettingsView';
+import CloudStorageIntegrationView from '../../components/user-dashboard/CloudStorageIntegrationView';
 
 function DashboardContent() {
   const router = useRouter();
@@ -2028,6 +2030,13 @@ function DashboardContent() {
                   customer={customer}
                   activeCameraKey={activeCameraKey}
                   onNavigateTab={handleSelectTab}
+                />
+              )}
+
+              {(activeTab === 'integrations' || activeTab === 'cloud_storage') && (
+                <CloudStorageIntegrationView
+                  user={user}
+                  customer={customer}
                 />
               )}
 

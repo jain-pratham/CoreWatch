@@ -6,6 +6,7 @@ import crypto from "crypto";
 import Event from "../models/Event";
 import User from "../models/User";
 import { emitToUser } from "../config/socket";
+import { CloudStorageHelper } from "../services/cloudStorageHelper";
 
 // Helper to sanitize base64 strings and save as JPEG
 const saveBase64Image = (base64String: string, outputDir: string): string => {
@@ -48,16 +49,40 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
     }
 
     let snapshotUrl = "";
+    let cloudResult: any = null;
     if (snapshotBase64) {
       const uploadsDir = path.join(process.cwd(), "uploads");
       snapshotUrl = saveBase64Image(snapshotBase64, uploadsDir);
+
+      try {
+        const matches = snapshotBase64.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
+        const buffer = matches
+          ? Buffer.from(matches[2], "base64")
+          : Buffer.from(snapshotBase64, "base64");
+
+        cloudResult = await CloudStorageHelper.uploadAlertEvidence({
+          userId: targetCustomerId.toString(),
+          category: type || "Safety Violation",
+          cameraKey: req.body.cameraId || "General-Feed",
+          filename: `evidence_${Date.now()}.jpg`,
+          buffer,
+          mimeType: "image/jpeg",
+        });
+      } catch (cloudErr) {
+        console.warn("Evidence cloud auto-upload note:", cloudErr);
+      }
     }
 
     const event = await Event.create({
       customerId: targetCustomerId,
+      cameraId: req.body.cameraId || "CAM-DEFAULT",
       type: type || "Safety Violation",
       severity: severity || "medium",
       snapshotUrl,
+      snapshotPath: snapshotUrl,
+      cloudFileId: cloudResult?.fileId || null,
+      cloudViewLink: cloudResult?.webViewLink || null,
+      cloudProvider: cloudResult?.provider || null,
       status: "unread",
       timestamp: new Date(),
     });

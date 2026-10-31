@@ -95,6 +95,18 @@ const AlertSchema = new Schema(
       type: String,
       default: "",
     },
+    cloudFileId: {
+      type: String,
+      default: null,
+    },
+    cloudViewLink: {
+      type: String,
+      default: null,
+    },
+    cloudProvider: {
+      type: String,
+      default: null,
+    },
     isRead: {
       type: Boolean,
       default: false,

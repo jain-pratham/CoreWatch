@@ -18,7 +18,8 @@ import {
   ArrowUpCircle,
   Zap,
   Radio,
-  ShieldAlert
+  ShieldAlert,
+  Cloud
 } from 'lucide-react';
 
 export interface UserNavbarProps {
@@ -420,6 +421,22 @@ export default function UserNavbar({
 
                     <button
                       onClick={() => {
+                        onSelectTab('integrations');
+                        setProfileOpen(false);
+                      }}
+                      className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl hover:bg-white/5 hover:text-white transition-colors text-left cursor-pointer font-medium text-slate-200"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Cloud className="w-3.5 h-3.5 text-orange-400" />
+                        <span>Cloud Storage & Drives</span>
+                      </div>
+                      <span className="text-[10px] uppercase font-bold text-orange-400 bg-orange-500/10 px-1.5 py-0.5 rounded border border-orange-500/20">
+                        Drive
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => {
                         onSelectTab('settings');
                         setProfileOpen(false);
                       }}
@@ -573,6 +590,26 @@ export default function UserNavbar({
                 {unacknowledgedCount}
               </span>
             ) : null}
+          </button>
+
+          <button
+            onClick={() => {
+              onSelectTab('integrations');
+              setMobileMenuOpen(false);
+            }}
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-colors text-left ${
+              activeTab === 'integrations' || activeTab === 'cloud_storage'
+                ? 'bg-orange-500/15 text-[#f97316] font-bold border border-orange-500/20'
+                : 'text-slate-300 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Cloud className="w-4 h-4 text-slate-400" />
+              <span>Cloud Storage & Drives</span>
+            </div>
+            <span className="text-[10px] uppercase font-bold text-orange-400 bg-orange-500/10 px-1.5 py-0.5 rounded border border-orange-500/20">
+              OAuth 2.0
+            </span>
           </button>
         </div>
       )}

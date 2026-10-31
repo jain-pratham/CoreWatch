@@ -7,6 +7,7 @@ import UserCameraManagementView from './UserCameraManagementView';
 import UserContentManagementView from './UserContentManagementView';
 import UserSettingsView from './UserSettingsView';
 import UserProfileView from './UserProfileView';
+import CloudStorageIntegrationView from './CloudStorageIntegrationView';
 import ZoneManagementView from '../zones/ZoneManagementView';
 import UserBillingSubscriptionView from './UserBillingSubscriptionView';
 import CustomConfirmDialog from '../common/CustomConfirmDialog';
@@ -440,6 +441,16 @@ export default function UserDashboardContainer({
             isTrialUser={isTrialUser}
             maxAllowedCameras={maxAllowedCameras}
             onNavigateTab={setActiveTab}
+          />
+        )}
+
+        {/* ========================================================================= */}
+        {/* 10. CLOUD STORAGE & DRIVE INTEGRATIONS */}
+        {/* ========================================================================= */}
+        {(activeTab === 'integrations' || activeTab === 'cloud_storage' || activeTab === 'storage') && (
+          <CloudStorageIntegrationView
+            user={user}
+            customer={customer}
           />
         )}
 

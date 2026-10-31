@@ -98,6 +98,34 @@ app.get("/api/payment/config", protect, getPaymentConfig);
 app.post("/api/payment/create-order", protect, createOrder);
 app.post("/api/payment/verify-payment", protect, verifyPayment);
 
+// Cloud Storage Integration Routes
+import {
+  getIntegrationsStatus,
+  getGoogleDriveAuthUrl,
+  handleGoogleDriveCallback,
+  disconnectGoogleDrive,
+  getOneDriveAuthUrl,
+  handleOneDriveCallback,
+  disconnectOneDrive,
+  uploadDocument,
+  testCloudEvidenceUpload,
+  uploadTemp,
+} from "./controllers/integrationController";
+
+app.get("/api/integrations/status", protect, getIntegrationsStatus);
+app.get("/api/integrations/google-drive/status", protect, getIntegrationsStatus);
+app.get("/api/integrations/google-drive/auth-url", protect, getGoogleDriveAuthUrl);
+app.get("/api/integrations/google-drive/callback", handleGoogleDriveCallback);
+app.post("/api/integrations/google-drive/disconnect", protect, disconnectGoogleDrive);
+
+app.get("/api/integrations/onedrive/status", protect, getIntegrationsStatus);
+app.get("/api/integrations/onedrive/auth-url", protect, getOneDriveAuthUrl);
+app.get("/api/integrations/onedrive/callback", handleOneDriveCallback);
+app.post("/api/integrations/onedrive/disconnect", protect, disconnectOneDrive);
+
+app.post("/api/integrations/upload", protect, uploadTemp.single("file"), uploadDocument);
+app.post("/api/integrations/test-upload", protect, testCloudEvidenceUpload);
+
 // Serve Static Uploads (for CCTV snapshots)
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
@@ -261,3 +289,16 @@ const PORT = Number(process.env.PORT) || 5050;
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running in ${process.env.NODE_ENV || "development"} mode on port ${PORT}`); // reload
 });
+
+// If PORT is not 5000, start an auxiliary listener on 5000 for OAuth callbacks if port is free
+if (PORT !== 5000) {
+  const auxServer = http.createServer(app);
+  auxServer
+    .listen(5000, "0.0.0.0", () => {
+      console.log(`Auxiliary OAuth listener active on port 5000`);
+    })
+    .on("error", (err: any) => {
+      // If port 5000 is occupied by another service or not allowed, ignore silently
+      console.log(`Port 5000 auxiliary listener not bound: ${err.message}`);
+    });
+}

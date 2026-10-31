@@ -430,6 +430,37 @@ export async function POST(request: Request) {
 
     console.log(`🚨 [Alerts API] Logged [${severity}] security incident for camera ${cameraKey} (${cameraDisplayName}) - Reason: ${finalReason}`);
 
+    // Asynchronously sync evidence screenshot to active connected Cloud Drive (Google Drive / OneDrive)
+    if (imageUrl && userId) {
+      const backendPort = process.env.PORT || 5050;
+      const backendUrl = process.env.BACKEND_API_URL || `http://127.0.0.1:${backendPort}`;
+      fetch(`${backendUrl}/api/integrations/test-upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: userId.toString(),
+          cameraKey,
+          category: featureCategory || category || "Security Alert",
+          image: imageUrl,
+        }),
+      })
+        .then((res) => res.json())
+        .then((cloudData) => {
+          if (cloudData.success && cloudData.fileId) {
+            Alert.findByIdAndUpdate(newAlert._id, {
+              cloudFileId: cloudData.fileId,
+              cloudViewLink: cloudData.webViewLink,
+              cloudProvider: cloudData.provider,
+            }).exec();
+            console.log(`☁️ [Cloud Storage] Synced alert evidence to ${cloudData.provider}: ${cloudData.folderPath}`);
+          }
+        })
+        .catch((syncErr) => {
+          // Cloud sync failure does not break core alert pipeline
+          console.warn("Evidence cloud auto-sync background note:", syncErr?.message || syncErr);
+        });
+    }
+
     // 5. Emit real-time incident event via Server-Sent Events (SSE)
     try {
       alertEmitter.emit(`alert:${userId}`, newAlert);

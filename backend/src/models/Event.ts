@@ -8,6 +8,9 @@ export interface IEvent extends Document {
   confidence: number;
   personCount: number;
   snapshotPath: string;
+  cloudFileId?: string;
+  cloudViewLink?: string;
+  cloudProvider?: string;
   status: "unread" | "read";
 }
 
@@ -44,6 +47,18 @@ const EventSchema: Schema = new Schema(
     snapshotPath: {
       type: String,
       required: [true, "Snapshot path is required"],
+    },
+    cloudFileId: {
+      type: String,
+      default: null,
+    },
+    cloudViewLink: {
+      type: String,
+      default: null,
+    },
+    cloudProvider: {
+      type: String,
+      default: null,
     },
     status: {
       type: String,

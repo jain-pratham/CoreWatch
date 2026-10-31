@@ -52,6 +52,22 @@ const CustomerSchema = new Schema(
       enum: ["Active", "Pending", "Suspended"],
       default: "Pending",
     },
+    googleDriveSettings: {
+      isEnabled: { type: Boolean, default: false },
+      refreshToken: { type: String, default: null },
+      accessToken: { type: String, default: null },
+      tokenExpiry: { type: Date, default: null },
+      rootFolderId: { type: String, default: null },
+      userEmail: { type: String, default: null },
+    },
+    oneDriveSettings: {
+      isEnabled: { type: Boolean, default: false },
+      refreshToken: { type: String, default: null },
+      accessToken: { type: String, default: null },
+      tokenExpiry: { type: Date, default: null },
+      rootFolderId: { type: String, default: null },
+      userEmail: { type: String, default: null },
+    },
   },
   {
     timestamps: true,

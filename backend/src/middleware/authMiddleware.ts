@@ -29,7 +29,38 @@ export const protect = async (
       );
 
       // Get user from the token, excluding password
-      req.user = await User.findById(decoded.id).select("-password");
+      const userId = decoded.id || decoded.userId || decoded._id;
+
+      if (userId) {
+        req.user = await User.findById(userId).select("-password");
+      }
+
+      // If not found in User, check if userId is a Customer ID or linked to a User
+      if (!req.user && userId) {
+        try {
+          const Customer = require("../models/Customer").default;
+          const cust = await Customer.findById(userId);
+          if (cust?.user) {
+            req.user = await User.findById(cust.user).select("-password");
+          }
+          if (!req.user && cust) {
+            req.user = cust;
+          }
+        } catch (e) {}
+      }
+
+      // Fallback: check x-user-email header or decoded.email
+      const candidateEmail = (req.headers["x-user-email"] as string) || decoded.email;
+      if (!req.user && candidateEmail) {
+        const cleanEmail = candidateEmail.toLowerCase().trim();
+        req.user = await User.findOne({ email: cleanEmail }).select("-password");
+        if (!req.user) {
+          try {
+            const Customer = require("../models/Customer").default;
+            req.user = await Customer.findOne({ email: cleanEmail }).select("-password");
+          } catch (e) {}
+        }
+      }
 
       if (!req.user) {
         res.status(401).json({ success: false, message: "Not authorized, user not found" });
