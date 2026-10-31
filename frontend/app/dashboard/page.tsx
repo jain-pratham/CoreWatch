@@ -85,6 +85,8 @@ import PlansManagementView from '../../components/billing/PlansManagementView';
 import UserDashboardContainer from '../../components/user-dashboard/UserDashboardContainer';
 import UserSettingsView from '../../components/user-dashboard/UserSettingsView';
 import CloudStorageIntegrationView from '../../components/user-dashboard/CloudStorageIntegrationView';
+import AdminAccountView from '../../components/admin/AdminAccountView';
+import AdminNotificationsView from '../../components/admin/AdminNotificationsView';
 
 function DashboardContent() {
   const router = useRouter();
@@ -1342,20 +1344,51 @@ function DashboardContent() {
                 <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500"></span>
               </button>
 
-              {/* Notification Popover */}
+              {/* Notification Popover with REAL DB Alerts */}
               {showNotifications && (
-                <div className="absolute right-0 mt-2 w-80 rounded-2xl border border-border bg-card p-4 shadow-2xl z-50">
+                <div className="absolute right-0 mt-2 w-80 rounded-2xl border border-border bg-card p-4 shadow-2xl z-50 animate-in fade-in slide-in-from-top-2 duration-150">
                   <div className="flex justify-between items-center pb-2 border-b border-border">
-                    <span className="text-xs font-bold text-foreground">Live Notifications</span>
-                    <span className="text-[10px] text-brand-gold-light dark:text-[#C0A06E] font-bold">2 Unread</span>
+                    <span className="text-xs font-bold text-foreground">Live Security Alerts</span>
+                    <span className="text-[10px] text-primary font-bold">
+                      {dbAlerts.filter(a => !a.isRead).length} Unread
+                    </span>
                   </div>
-                  <div className="space-y-3 pt-3">
-                    <div className="text-xs p-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400">
-                      🚨 CAM-03 No Helmet alert logged.
-                    </div>
-                    <div className="text-xs p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-700 dark:text-cyan-400">
-                      ✅ System health check 100% OK.
-                    </div>
+                  <div className="space-y-2 pt-3 max-h-64 overflow-y-auto">
+                    {dbAlerts.length === 0 ? (
+                      <p className="text-xs text-muted-foreground text-center py-4">No recent security alerts.</p>
+                    ) : (
+                      dbAlerts.slice(0, 4).map((alt: any, idx: number) => (
+                        <div
+                          key={alt._id || alt.id || idx}
+                          onClick={() => {
+                            handleSelectTab('admin_notifications');
+                            setShowNotifications(false);
+                          }}
+                          className={`text-xs p-2.5 rounded-xl border cursor-pointer transition-colors ${
+                            alt.severity === 'critical'
+                              ? 'bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20'
+                              : 'bg-muted/60 border-border text-foreground hover:bg-muted'
+                          }`}
+                        >
+                          <div className="font-bold flex items-center justify-between">
+                            <span className="truncate">{alt.type || alt.category || 'Security Alert'}</span>
+                            <span className="text-[10px] font-mono text-muted-foreground">{alt.cameraKey || alt.camera || ''}</span>
+                          </div>
+                          <div className="text-[11px] text-muted-foreground mt-0.5 truncate">{alt.message}</div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="pt-3 border-t border-border mt-3">
+                    <button
+                      onClick={() => {
+                        handleSelectTab('admin_notifications');
+                        setShowNotifications(false);
+                      }}
+                      className="w-full text-center text-xs font-bold text-primary hover:underline cursor-pointer block"
+                    >
+                      View All Notifications →
+                    </button>
                   </div>
                 </div>
               )}
@@ -1368,7 +1401,7 @@ function DashboardContent() {
                 className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-border hover:bg-muted transition-colors cursor-pointer"
               >
                 {user?.avatar ? (
-                  <img src={user.avatar} alt={user?.name || 'User'} className="w-6 h-6 rounded-full object-cover" />
+                  <img src={user.avatar} alt={user?.name || 'User'} className="w-6 h-6 rounded-full object-cover ring-1 ring-primary/40" />
                 ) : (
                   <div className="w-6 h-6 rounded-full bg-[#785D32] text-white font-black text-[10px] flex items-center justify-center">
                     {avatarInitials}
@@ -1381,14 +1414,45 @@ function DashboardContent() {
               </button>
 
               {showProfileMenu && (
-                <div className="absolute right-0 mt-2 w-48 rounded-xl border border-border bg-card p-2 shadow-2xl z-50 text-xs">
+                <div className="absolute right-0 mt-2 w-52 rounded-2xl border border-border bg-card p-2 shadow-2xl z-50 text-xs animate-in fade-in slide-in-from-top-2 duration-150">
                   <div className="px-3 py-2 border-b border-border">
                     <div className="font-bold text-foreground">{user?.name}</div>
-                    <div className="text-[10px] text-muted-foreground truncate">{user?.email}</div>
+                    <div className="text-[10px] text-muted-foreground truncate font-mono">{user?.email}</div>
+                    <span className="inline-block px-2 py-0.5 rounded-full text-[9px] font-black bg-red-500/15 text-red-400 border border-red-500/30 mt-1 uppercase font-mono tracking-wider">
+                      {user?.role}
+                    </span>
                   </div>
-                  <button onClick={handleLogout} className="w-full text-left px-3 py-2 text-red-500 font-bold hover:bg-red-500/10 rounded-lg mt-1 transition-colors cursor-pointer">
-                    Sign Out
-                  </button>
+                  <div className="py-1 space-y-0.5">
+                    <button
+                      onClick={() => {
+                        handleSelectTab('admin_profile');
+                        setShowProfileMenu(false);
+                      }}
+                      className="w-full text-left px-3 py-2 hover:bg-muted rounded-xl transition-colors cursor-pointer font-medium text-foreground flex items-center justify-between"
+                    >
+                      <span>My Account</span>
+                      <span className="text-[10px] text-muted-foreground font-mono">Profile</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        handleSelectTab('admin_notifications');
+                        setShowProfileMenu(false);
+                      }}
+                      className="w-full text-left px-3 py-2 hover:bg-muted rounded-xl transition-colors cursor-pointer font-medium text-foreground flex items-center justify-between"
+                    >
+                      <span>Notifications</span>
+                      {dbAlerts.filter(a => !a.isRead).length > 0 && (
+                        <span className="px-1.5 py-0.2 rounded-full bg-red-500/20 text-red-400 text-[10px] font-bold">
+                          {dbAlerts.filter(a => !a.isRead).length}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                  <div className="border-t border-border pt-1">
+                    <button onClick={handleLogout} className="w-full text-left px-3 py-2 text-red-500 font-bold hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer">
+                      Sign Out
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -2202,65 +2266,26 @@ function DashboardContent() {
               )}
 
               {activeTab === 'admin_notifications' && (
-                <div className="max-w-2xl border border-border bg-card rounded-2xl p-6 space-y-6 shadow-sm">
-                  <div>
-                    <h2 className="text-lg font-bold text-foreground">Admin System Notifications</h2>
-                    <p className="text-xs text-muted-foreground font-sans">Recent alerts regarding client signups, system status, and system configurations.</p>
-                  </div>
-                  <div className="space-y-4">
-                    <div className="p-4 rounded-xl border border-border bg-background/50 text-xs flex gap-3 items-start">
-                      <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0 font-bold font-sans">✓</div>
-                      <div>
-                        <div className="font-bold text-foreground font-sans">Successful Database Backup</div>
-                        <div className="text-muted-foreground mt-0.5 font-sans">CoreWatch automated system backup completed successfully. All logs replicated.</div>
-                        <div className="text-[10px] text-muted-foreground mt-1 font-mono">10 minutes ago</div>
-                      </div>
-                    </div>
-                    <div className="p-4 rounded-xl border border-border bg-background/50 text-xs flex gap-3 items-start">
-                      <div className="w-8 h-8 rounded-lg bg-brand-blue/10 text-brand-blue flex items-center justify-center shrink-0 font-bold font-sans">👤</div>
-                      <div>
-                        <div className="font-bold text-foreground font-sans">New Client Registration Request</div>
-                        <div className="text-muted-foreground mt-0.5 font-sans">Enterprise subscriber registered: "Adani Logistics Ltd" with 15 camera licenses.</div>
-                        <div className="text-[10px] text-muted-foreground mt-1 font-mono">2 hours ago</div>
-                      </div>
-                    </div>
-                    <div className="p-4 rounded-xl border border-border bg-background/50 text-xs flex gap-3 items-start">
-                      <div className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0 font-bold font-sans">⚠</div>
-                      <div>
-                        <div className="font-bold text-foreground font-sans">AI Node High GPU Thermal Warning</div>
-                        <div className="text-muted-foreground mt-0.5 font-sans">Primary GPU cluster node reached 82°C. Air ventilation cooling triggered automatically.</div>
-                        <div className="text-[10px] text-muted-foreground mt-1 font-mono">4 hours ago</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <AdminNotificationsView
+                  dbAlerts={dbAlerts}
+                  setDbAlerts={setDbAlerts}
+                  customers={customers}
+                  cameras={cameras}
+                  dbInvoices={dbInvoices}
+                  onNavigateTab={handleSelectTab}
+                  token={user?.token}
+                />
               )}
 
               {activeTab === 'admin_profile' && (
-                <div className="max-w-xl border border-border bg-card rounded-2xl p-6 space-y-6 shadow-sm">
-                  <div>
-                    <h2 className="text-lg font-bold text-foreground">Admin Account Profile</h2>
-                    <p className="text-xs text-muted-foreground font-sans">Manage your credentials, admin roles, and multi-tenant privileges.</p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4 text-xs font-sans">
-                    <div className="p-4 rounded-xl bg-background/40 border border-border">
-                      <span className="text-muted-foreground block mb-0.5">FULL NAME</span>
-                      <span className="font-bold text-sm text-foreground">{user?.name}</span>
-                    </div>
-                    <div className="p-4 rounded-xl bg-background/40 border border-border">
-                      <span className="text-muted-foreground block mb-0.5">EMAIL ADDRESS</span>
-                      <span className="font-bold text-sm text-foreground">{user?.email}</span>
-                    </div>
-                    <div className="p-4 rounded-xl bg-background/40 border border-border">
-                      <span className="text-muted-foreground block mb-0.5">ACCOUNT ROLE</span>
-                      <span className="font-bold text-sm text-red-500 uppercase">{user?.role}</span>
-                    </div>
-                    <div className="p-4 rounded-xl bg-background/40 border border-border">
-                      <span className="text-muted-foreground block mb-0.5">TENANT IDENTIFIER</span>
-                      <span className="font-bold text-sm text-foreground">COREWATCH-ROOT-TENANT</span>
-                    </div>
-                  </div>
-                </div>
+                <AdminAccountView
+                  user={user}
+                  setUser={setUser}
+                  customersCount={customers.length}
+                  camerasCount={cameras.length}
+                  alertsCount={dbAlerts.length}
+                  onNavigateTab={handleSelectTab}
+                />
               )}
 
               {activeTab === 'help_guidelines' && (

@@ -26,7 +26,7 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 // Import controllers
 import { registerUser, loginUser, getMe, updateUserRole, verifyEmail } from "./controllers/authController";
-import { getUsers, createUser, deleteUser } from "./controllers/userController";
+import { getUsers, createUser, deleteUser, getUserProfile, updateUserProfile, changeUserPassword } from "./controllers/userController";
 import { getLeads, createLead, updateLead, deleteLead } from "./controllers/leadController";
 
 // Public Auth Routes
@@ -36,7 +36,10 @@ app.post("/api/auth/verify-email", verifyEmail);
 app.get("/api/auth/me", protect, getMe);
 app.put("/api/auth/role", protect, updateUserRole);
 
-// Admin-only User Routes
+// User & Profile Routes
+app.get("/api/users/profile", protect, getUserProfile);
+app.put("/api/users/profile", protect, updateUserProfile);
+app.put("/api/users/change-password", protect, changeUserPassword);
 app.get("/api/users", protect, isAdmin, getUsers);
 app.post("/api/users", protect, isAdmin, createUser);
 app.delete("/api/users/:id", protect, isAdmin, deleteUser);
