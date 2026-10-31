@@ -40,7 +40,7 @@ function MainLayoutContent({ children }: { children: React.ReactNode }) {
   };
 
   const handleLogout = () => {
-    alert("Logout clicked!");
+    console.log("User logged out");
   };
 
   const sidebarWidth = collapsed ? "68px" : "260px";

@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import CustomConfirmDialog from '../../components/common/CustomConfirmDialog';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -11,13 +12,14 @@ export default function LoginPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [loginSuccess, setLoginSuccess] = useState(false);
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [showForgotDialog, setShowForgotDialog] = useState(false);
   const [formData, setFormData] = useState({
     email: '',
     password: '',
     rememberMe: false,
   });
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5050';
 
   useEffect(() => {
     const isDark = document.documentElement.classList.contains('dark');
@@ -164,7 +166,7 @@ export default function LoginPage() {
               <div className="space-y-1.5">
                 <div className="flex justify-between items-center">
                   <label className="text-xs font-bold text-muted-foreground" htmlFor="login-password">Password</label>
-                  <a href="#" onClick={(e) => { e.preventDefault(); alert("Password reset request sent to administrator."); }} className="text-[11px] font-semibold text-brand-gold-light hover:text-brand-gold hover:underline">
+                  <a href="#" onClick={(e) => { e.preventDefault(); setShowForgotDialog(true); }} className="text-[11px] font-semibold text-brand-gold-light hover:text-brand-gold hover:underline">
                     Forgot password?
                   </a>
                 </div>
@@ -314,6 +316,16 @@ export default function LoginPage() {
         </div>
 
       </div>
+
+      <CustomConfirmDialog
+        isOpen={showForgotDialog}
+        title="Password Reset Request"
+        message="A password reset request has been logged and sent to the administrator. You will receive assistance shortly."
+        confirmText="OK"
+        variant="info"
+        hideCancel
+        onConfirm={() => setShowForgotDialog(false)}
+      />
 
     </div>
   );

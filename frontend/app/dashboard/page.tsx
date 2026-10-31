@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { securityAudio } from '@/lib/securityAudio';
 import { nativeNotifier } from '@/lib/nativeNotifier';
+import CustomConfirmDialog from '../../components/common/CustomConfirmDialog';
 
 interface UserData {
   _id: string;
@@ -69,7 +70,6 @@ const NAVIGATION_ITEMS: NavItem[] = [
     { label: 'Invoices', href: '/dashboard?tab=invoices' },
     { label: 'Subscription & Plan', href: '/dashboard?tab=subscription_detail' }
   ]},
-  { label: 'Event History', href: '/dashboard?tab=event_history', icon: History, roles: ['user'] },
   { label: 'Profile', href: '/dashboard?tab=profile', icon: UserCircle, roles: ['user'] },
   { label: 'Notification', href: '/dashboard?tab=notification', icon: Bell, roles: ['user'] },
   { label: 'Demo Overview', href: '/dashboard?tab=demo_overview', icon: Eye, roles: ['demo'] },
@@ -91,9 +91,28 @@ function DashboardContent() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [activeTab, setActiveTab] = useState<string>(urlTab || 'dashboard');
 
+  const handleSelectTab = (newTab: string) => {
+    setActiveTab(newTab);
+    if (typeof window !== 'undefined') {
+      const targetUrl = newTab === 'dashboard' ? '/dashboard' : '/dashboard?tab=' + encodeURIComponent(newTab);
+      window.history.pushState({ tab: newTab }, '', targetUrl);
+      localStorage.setItem('activeTab', newTab);
+    }
+  };
+
   useEffect(() => {
     if (urlTab) setActiveTab(urlTab);
   }, [urlTab]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      const tabFromUrl = params.get('tab') || 'dashboard';
+      setActiveTab(tabFromUrl);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
   const [tabLoaded, setTabLoaded] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [upgrading, setUpgrading] = useState(false);
@@ -121,7 +140,15 @@ function DashboardContent() {
   const [dbPlans, setDbPlans] = useState<any[]>([]);
   const [loadingInvoices, setLoadingInvoices] = useState(true);
   const [activeCameraKey, setActiveCameraKey] = useState<string>('');
-  const [customer, setCustomer] = useState<any>(null);
+  const [customer, setCustomer] = useState<any>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('customer');
+        if (stored) return JSON.parse(stored);
+      } catch {}
+    }
+    return null;
+  });
   const [copySuccess, setCopySuccess] = useState(false);
   const [camName, setCamName] = useState('');
   const [camIp, setCamIp] = useState('');
@@ -137,32 +164,78 @@ function DashboardContent() {
   const [isAdding, setIsAdding] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<{ success: boolean; message: string } | null>(null);
 
+  // Custom Confirmation & Alert Dialog States (replaces all window.confirm and alert)
+  const [cameraToDelete, setCameraToDelete] = useState<{ cameraKey: string; name?: string } | null>(null);
+  const [isDeletingCamera, setIsDeletingCamera] = useState(false);
+  const [customAlert, setCustomAlert] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    variant?: 'danger' | 'warning' | 'info' | 'success';
+    confirmText?: string;
+    cancelText?: string;
+    onConfirm?: () => void;
+    onCancel?: () => void;
+  } | null>(null);
+
+  const showAlert = (
+    title: string,
+    message: string,
+    variant: 'danger' | 'warning' | 'info' | 'success' = 'info',
+    onConfirm?: () => void
+  ) => {
+    setCustomAlert({
+      isOpen: true,
+      title,
+      message,
+      variant,
+      onConfirm,
+    });
+  };
+
   // Trial User and Camera Quota Helpers (Test user has unlimited quota and zero locks)
   const isTestUser = user?.email === 'test@gmail.com';
   const isTrialUser = !isTestUser && user?.role !== 'admin' && (
     customer?.plan === 'Demo Free' ||
-    (customer?.cameras === 1 && (customer?.plan?.toLowerCase().includes('demo') || customer?.plan?.toLowerCase().includes('free')))
+    customer?.plan?.toLowerCase().includes('demo') ||
+    customer?.plan?.toLowerCase().includes('trial') ||
+    customer?.plan?.toLowerCase().includes('free')
   );
-  const maxAllowedCameras = isTestUser ? 9999 : (customer?.cameras || (isTrialUser ? 1 : 5));
+
+  // Match customer's active plan from dbPlans (saved/edited by Super Admin)
+  const activePlanDoc = useMemo(() => {
+    if (!customer?.plan || !Array.isArray(dbPlans)) return null;
+    return dbPlans.find((p: any) => p.name?.toLowerCase() === (customer.plan || '').toLowerCase()) || null;
+  }, [customer?.plan, dbPlans]);
+
+  // Live camera limit directly governed by the plan saved in database by Super Admin
+  const maxAllowedCameras = isTestUser 
+    ? 9999 
+    : (activePlanDoc?.maxCameras !== undefined 
+        ? activePlanDoc.maxCameras 
+        : (customer?.cameras !== undefined 
+            ? customer.cameras 
+            : (isTrialUser ? 1 : 5)));
+
   const isCameraLimitReached = isTestUser ? false : (cameras.length >= maxAllowedCameras);
 
   // Filter navigation items for trial users who already have their camera configured
   const computedNavItems = useMemo(() => {
     return NAVIGATION_ITEMS.map((item) => {
       if (item.label === 'Camera Hub') {
-        if (isTrialUser && (cameras.length >= 1 || isCameraLimitReached)) {
+        if (isTrialUser && (cameras.length >= maxAllowedCameras || isCameraLimitReached)) {
           return {
             ...item,
             children: [
               { label: 'All Cameras', href: '/dashboard?tab=all_cameras', icon: Video },
-              { label: 'Upgrade Plan', href: '/dashboard?tab=subscription_detail', icon: ArrowUpCircle }
+              { label: 'Upgrade Plan', href: '/dashboard?tab=billing', icon: ArrowUpCircle }
             ]
           };
         }
       }
       return item;
     });
-  }, [isTrialUser, cameras.length, isCameraLimitReached]);
+  }, [isTrialUser, cameras.length, maxAllowedCameras, isCameraLimitReached]);
 
   // Camera Directory Filter, Search and Action state
   const [cameraSearchQuery, setCameraSearchQuery] = useState('');
@@ -232,7 +305,7 @@ function DashboardContent() {
       }
     } catch (err) {
       console.error("Failed to toggle feature:", err);
-      alert("Failed to update feature settings.");
+      showAlert("Settings Error", "Failed to update feature settings.", "danger");
     }
   };
 
@@ -295,8 +368,18 @@ function DashboardContent() {
     return matchesSearch && matchesMfg;
   });
 
-  const handleDeleteCamera = async (cameraKeyToDelete: string) => {
-    if (!confirm(`Are you sure you want to remove camera ${cameraKeyToDelete}?`)) return;
+  const handleDeleteCamera = (cameraKeyToDelete: string) => {
+    const cam = cameras.find((c) => c.cameraKey === cameraKeyToDelete);
+    setCameraToDelete({
+      cameraKey: cameraKeyToDelete,
+      name: cam?.locationName || cam?.name || cameraKeyToDelete,
+    });
+  };
+
+  const confirmDeleteCamera = async () => {
+    if (!cameraToDelete) return;
+    const cameraKeyToDelete = cameraToDelete.cameraKey;
+    setIsDeletingCamera(true);
     try {
       const res = await fetch(`/api/cameras?cameraKey=${cameraKeyToDelete}`, {
         method: 'DELETE',
@@ -311,11 +394,14 @@ function DashboardContent() {
           const remaining = cameras.filter((c) => c.cameraKey !== cameraKeyToDelete);
           setActiveCameraKey(remaining.length > 0 ? remaining[0].cameraKey : '');
         }
+        setCameraToDelete(null);
       } else {
-        alert(data.error || 'Failed to delete camera.');
+        showAlert('Failed to Remove Camera', data.error || 'Failed to delete camera.', 'danger');
       }
     } catch (err) {
-      alert('Failed to delete camera.');
+      showAlert('Network Error', 'Failed to delete camera. Please check your network connection.', 'danger');
+    } finally {
+      setIsDeletingCamera(false);
     }
   };
 
@@ -342,7 +428,7 @@ function DashboardContent() {
       }
     } catch (err) {
       console.error("Failed to toggle feature:", err);
-      alert("Failed to update feature settings.");
+      showAlert("Settings Error", "Failed to update feature settings.", "danger");
     }
   };
   const [openSubmenus, setOpenSubmenus] = useState<Record<string, boolean>>({
@@ -380,7 +466,7 @@ function DashboardContent() {
   ]);
 
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5050';
 
   // 1. Initial User Authentication Check
   useEffect(() => {
@@ -427,6 +513,9 @@ function DashboardContent() {
                 .then((cData) => {
                   if (cData.success && cData.data) {
                     setCustomer(cData.data);
+                    if (typeof window !== 'undefined') {
+                      localStorage.setItem('customer', JSON.stringify(cData.data));
+                    }
                     if (cData.data.status === 'Active' || freshUser.email === 'test@gmail.com') {
                       // Allowed to enter dashboard
                       setLoading(false);
@@ -463,14 +552,21 @@ function DashboardContent() {
     }
   }, [router, API_URL]);
 
-  // Persist active tab selection across refreshes
+  // Persist active tab selection across refreshes and sync with URL
   useEffect(() => {
-    const savedTab = localStorage.getItem('activeTab');
-    if (savedTab) {
-      setActiveTab(savedTab);
+    if (urlTab) {
+      setActiveTab(urlTab);
+    } else {
+      const savedTab = localStorage.getItem('activeTab');
+      if (savedTab) {
+        setActiveTab(savedTab);
+        if (savedTab !== 'dashboard') {
+          window.history.replaceState({ tab: savedTab }, '', '/dashboard?tab=' + encodeURIComponent(savedTab));
+        }
+      }
     }
     setTabLoaded(true);
-  }, []);
+  }, [urlTab]);
 
   useEffect(() => {
     if (tabLoaded) {
@@ -483,26 +579,6 @@ function DashboardContent() {
     if (!user || !user.token) return;
     const token = user.token;
 
-    const provisionFirstCamera = async () => {
-      try {
-        const res = await fetch('/api/cameras', {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}` 
-          },
-          body: JSON.stringify({ locationName: "Main Shop" })
-        });
-        const data = await res.json();
-        if (data.success && data.data) {
-          setCameras([data.data]);
-          setActiveCameraKey(data.data.cameraKey);
-        }
-      } catch (err) {
-        console.log("Failed to provision default camera:", err);
-      }
-    };
-
     const loadCameras = async () => {
       try {
         const res = await fetch('/api/cameras', {
@@ -514,8 +590,7 @@ function DashboardContent() {
           if (data.data.length > 0) {
             setActiveCameraKey(data.data[0].cameraKey);
           } else {
-            // No camera provisioned yet, create one automatically
-            await provisionFirstCamera();
+            setActiveCameraKey('');
           }
         }
       } catch (err) {
@@ -921,7 +996,6 @@ function DashboardContent() {
           { id: 'subscription_detail', label: 'Subscription & Plan', icon: 'M3 10h18M7 15h1m4 0h1m-7 4h12a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' }
         ]
       },
-      { id: 'event_history', label: 'Event History', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
       { id: 'profile', label: 'Profile', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
       { id: 'notification', label: 'Notification', icon: 'M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9' },
     ],
@@ -946,7 +1020,7 @@ function DashboardContent() {
 
   const handleTestConnection = async () => {
     if (!camIp || !camPort || !camUsername || !camPassword || !camRtsp) {
-      alert("Please enter all required camera details.");
+      showAlert("Missing Information", "Please enter all required camera details (IP, Port, Username, Password, RTSP URL).", "warning");
       return;
     }
     setIsTesting(true);
@@ -988,11 +1062,11 @@ function DashboardContent() {
   const handleAddCameraSubmitInternal = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!camName || !camIp || !camPort || !camUsername || !camPassword || !camRtsp) {
-      alert("Please enter all required camera details.");
+      showAlert("Missing Information", "Please enter all required camera details.", "warning");
       return;
     }
     if (cameras.length >= (customer?.cameras || 5)) {
-      alert(`Camera limit reached. Your current subscription allows up to ${customer?.cameras || 5} cameras.`);
+      showAlert("Camera Limit Reached", `Your current subscription allows up to ${customer?.cameras || 5} cameras. Please upgrade your plan to add more cameras.`, "warning", () => setActiveTab('billing'));
       return;
     }
 
@@ -1030,12 +1104,12 @@ function DashboardContent() {
         setCamModel('');
         setCamLocation('');
         setConnectionStatus(null);
-        alert("Camera registered successfully!");
+        showAlert("Camera Connected", "Camera registered successfully and linked to your security grid!", "success");
       } else {
-        alert(data.error || "Failed to add camera.");
+        showAlert("Failed to Add Camera", data.error || "Failed to add camera.", "danger");
       }
     } catch (err) {
-      alert("An unexpected error occurred while adding the camera.");
+      showAlert("System Error", "An unexpected error occurred while adding the camera.", "danger");
     } finally {
       setIsAdding(false);
     }
@@ -1064,13 +1138,14 @@ function DashboardContent() {
           dbAlerts={dbAlerts}
           setDbAlerts={setDbAlerts}
           dbInvoices={dbInvoices}
+          dbPlans={dbPlans}
           activeCameraKey={activeCameraKey}
           setActiveCameraKey={setActiveCameraKey}
           isTrialUser={isTrialUser}
           maxAllowedCameras={maxAllowedCameras}
           isCameraLimitReached={isCameraLimitReached}
           activeTab={activeTab}
-          setActiveTab={setActiveTab}
+          setActiveTab={handleSelectTab}
           onLogout={() => { localStorage.clear(); router.push('/login'); }}
           openViewModal={openViewModal}
           openSettingsModal={openSettingsModal}
@@ -1111,6 +1186,44 @@ function DashboardContent() {
           connectionStatus={connectionStatus}
           testCameraConnection={handleTestConnection}
           handleAddCameraSubmit={handleAddCameraSubmitInternal}
+        />
+
+        {/* Custom Delete Camera Confirmation Dialog (Matches Image 2) */}
+        <CustomConfirmDialog
+          isOpen={!!cameraToDelete}
+          title="Delete Camera?"
+          message={
+            <>
+              Are you sure you want to delete camera <strong className="text-foreground">&ldquo;{cameraToDelete?.cameraKey}&rdquo;</strong>{cameraToDelete?.name && cameraToDelete.name !== cameraToDelete.cameraKey ? ` (${cameraToDelete.name})` : ''}? This action cannot be undone and will stop AI alerting for this camera node.
+            </>
+          }
+          confirmText="Delete Camera"
+          cancelText="Cancel"
+          variant="danger"
+          isLoading={isDeletingCamera}
+          onConfirm={confirmDeleteCamera}
+          onCancel={() => {
+            if (!isDeletingCamera) setCameraToDelete(null);
+          }}
+        />
+
+        {/* Universal Custom Alert Modal */}
+        <CustomConfirmDialog
+          isOpen={!!customAlert?.isOpen}
+          title={customAlert?.title || 'Notice'}
+          message={customAlert?.message || ''}
+          confirmText={customAlert?.confirmText || 'OK'}
+          cancelText={customAlert?.cancelText}
+          variant={customAlert?.variant || 'info'}
+          hideCancel={!customAlert?.onCancel}
+          onConfirm={() => {
+            if (customAlert?.onConfirm) customAlert.onConfirm();
+            setCustomAlert(null);
+          }}
+          onCancel={() => {
+            if (customAlert?.onCancel) customAlert.onCancel();
+            setCustomAlert(null);
+          }}
         />
       </div>
     );
@@ -1787,7 +1900,7 @@ function DashboardContent() {
                                   </td>
                                   <td className="py-3 px-4 text-right">
                                     <button 
-                                      onClick={() => alert(`Downloading PDF for ${invoiceId}`)}
+                                      onClick={() => showAlert("Invoice Download", `Generating and downloading PDF statement for ${invoiceId}...`, "info")}
                                       className="px-2.5 py-1 text-[11px] font-bold rounded-lg border border-border hover:bg-muted text-foreground transition-all cursor-pointer font-sans"
                                     >
                                       Download
@@ -2096,8 +2209,21 @@ function DashboardContent() {
                             alt={`CCTV Stream - ${camera.locationName}`}
                             className="w-full h-full object-contain relative z-0"
                             onError={(e) => {
-                              // Fallback to static mock image if local server is down
-                              (e.target as HTMLImageElement).src = "/camera_feed_mock.jpg";
+                              const target = e.target as HTMLImageElement;
+                              target.style.display = 'none';
+                              const parent = target.parentElement;
+                              if (parent && !parent.querySelector('.offline-camera-banner')) {
+                                const div = document.createElement('div');
+                                div.className = 'offline-camera-banner absolute inset-0 flex flex-col items-center justify-center p-4 text-center z-10 bg-[#090b14] select-none';
+                                div.innerHTML = `
+                                  <div class="w-12 h-12 rounded-xl bg-[#141626] border border-orange-500/20 text-orange-400 flex items-center justify-center mb-2">
+                                    <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                                  </div>
+                                  <span class="text-xs font-bold text-white mb-0.5">Camera Feed Inactive</span>
+                                  <span class="text-[10px] text-zinc-400 font-mono">Stream Signal Offline</span>
+                                `;
+                                parent.appendChild(div);
+                              }
                             }}
                           />
                         </div>
@@ -2676,7 +2802,7 @@ function DashboardContent() {
                         type="button"
                         onClick={async () => {
                           if (!camIp || !camPort || !camUsername || !camPassword || !camRtsp) {
-                            alert("Please enter all required camera details.");
+                            showAlert("Missing Information", "Please enter all required camera details (IP, Port, Username, Password, RTSP URL).", "warning");
                             return;
                           }
                           setIsTesting(true);
@@ -2731,11 +2857,11 @@ function DashboardContent() {
                         type="button"
                         onClick={async () => {
                           if (!camName || !camIp || !camPort || !camUsername || !camPassword || !camRtsp) {
-                            alert("Please enter all required camera details.");
+                            showAlert("Missing Information", "Please enter all required camera details.", "warning");
                             return;
                           }
                           if (cameras.length >= (customer?.cameras || 5)) {
-                            alert(`Camera limit reached. Your current subscription allows up to ${customer?.cameras || 5} cameras.`);
+                            showAlert("Camera Limit Reached", `Your current subscription allows up to ${customer?.cameras || 5} cameras. Please upgrade your plan to add more cameras.`, "warning", () => setActiveTab('billing'));
                             return;
                           }
 
@@ -2777,14 +2903,14 @@ function DashboardContent() {
                               setCamLocation('');
                               setConnectionStatus(null);
 
-                              alert("Camera registered successfully!");
+                              showAlert("Camera Connected", "Camera registered successfully and linked to your security grid!", "success");
                               // Navigate to Live Camera stream
                               router.push('/dashboard?tab=live_camera');
                             } else {
-                              alert(data.error || "Failed to add camera.");
+                              showAlert("Failed to Add Camera", data.error || "Failed to add camera.", "danger");
                             }
                           } catch (err) {
-                            alert("An unexpected error occurred while adding the camera.");
+                            showAlert("System Error", "An unexpected error occurred while adding the camera.", "danger");
                           } finally {
                             setIsAdding(false);
                           }
@@ -2814,6 +2940,7 @@ function DashboardContent() {
                   activeCameraKey={activeCameraKey}
                   setActiveCameraKey={setActiveCameraKey}
                   apiUrl={API_URL}
+                  onNavigateToLiveCamera={() => setActiveTab('live_camera')}
                 />
               )}
 
@@ -2864,7 +2991,7 @@ function DashboardContent() {
                                 </td>
                                 <td className="py-3 px-4 text-right">
                                   <button 
-                                    onClick={() => alert(`Downloading PDF receipt for invoice ${inv.invoiceNumber}`)}
+                                    onClick={() => showAlert("Invoice Download", `Generating and downloading PDF receipt for ${inv.invoiceNumber}...`, "info")}
                                     className="px-2.5 py-1 text-[11px] font-bold rounded-lg border border-border hover:bg-muted text-foreground transition-all cursor-pointer font-sans"
                                   >
                                     Download PDF
@@ -2928,7 +3055,7 @@ function DashboardContent() {
                           <span>Billing History ({dbInvoices.length})</span>
                         </button>
                         <button
-                          onClick={() => alert("Please contact enterprise sales at support@corewatch.ai to customize or upgrade your license tier.")}
+                          onClick={() => showAlert("Enterprise Tier Upgrade", "Please contact enterprise sales at support@corewatch.ai to customize or upgrade your license tier.", "info")}
                           className="px-4 py-2 text-xs font-semibold rounded-lg bg-[var(--primary)] hover:opacity-95 text-white transition-all cursor-pointer shadow-sm flex items-center gap-1.5"
                         >
                           <Zap className="w-3.5 h-3.5 text-amber-300" />
@@ -3046,7 +3173,7 @@ function DashboardContent() {
                         {isTrialUser && isCameraLimitReached ? (
                           <button
                             onClick={() => {
-                              alert("Please contact enterprise sales at support@corewatch.ai or choose an upgraded plan to increase your camera limit.");
+                              showAlert("Upgrade Required", "Please contact enterprise sales at support@corewatch.ai or choose an upgraded plan to increase your camera limit.", "warning", () => setActiveTab('billing'));
                             }}
                             className="w-full py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-sm"
                           >
@@ -3186,7 +3313,7 @@ function DashboardContent() {
                             </div>
                           </div>
                           <button
-                            onClick={() => alert("Payment gateway portal will open to update billing details.")}
+                            onClick={() => showAlert("Payment Methods", "Payment gateway integration will open to manage your payment cards and billing preferences.", "info")}
                             className="text-xs font-semibold text-brand-blue dark:text-brand-light-blue hover:underline cursor-pointer"
                           >
                             Edit
@@ -3271,7 +3398,7 @@ function DashboardContent() {
                                   </td>
                                   <td className="py-2.5 px-3.5 text-right">
                                     <button
-                                      onClick={() => alert(`Downloading PDF receipt for invoice ${inv.invoiceNumber}`)}
+                                      onClick={() => showAlert("Invoice Download", `Generating and downloading PDF receipt for invoice ${inv.invoiceNumber}...`, "info")}
                                       className="text-[11px] font-semibold text-brand-blue dark:text-brand-light-blue hover:underline cursor-pointer"
                                     >
                                       Download PDF
@@ -3443,12 +3570,12 @@ function DashboardContent() {
                             if (data.success && data.data) {
                               setCameras([data.data, ...cameras]);
                               setActiveCameraKey(data.data.cameraKey);
-                              alert(`Successfully provisioned new key: ${data.data.cameraKey}`);
+                              showAlert("Key Provisioned", `Successfully provisioned new camera key: ${data.data.cameraKey}`, "success");
                             } else {
-                              alert(data.error || "Failed to provision new camera key.");
+                              showAlert("Provisioning Failed", data.error || "Failed to provision new camera key.", "danger");
                             }
                           } catch (err) {
-                            alert("Failed to provision new camera key.");
+                            showAlert("Network Error", "Failed to provision new camera key.", "danger");
                           }
                         }}
                         className="px-4 py-2 text-xs font-bold border border-border hover:bg-muted rounded-xl transition-all cursor-pointer text-foreground"
@@ -3713,7 +3840,21 @@ function DashboardContent() {
                 alt={selectedViewCamera.name || "Live Stream"}
                 className="w-full h-full object-contain relative z-0"
                 onError={(e) => {
-                  (e.target as HTMLImageElement).src = "/camera_feed_mock.jpg";
+                  const target = e.target as HTMLImageElement;
+                  target.style.display = 'none';
+                  const parent = target.parentElement;
+                  if (parent && !parent.querySelector('.offline-camera-banner')) {
+                    const div = document.createElement('div');
+                    div.className = 'offline-camera-banner absolute inset-0 flex flex-col items-center justify-center p-4 text-center z-10 bg-[#090b14] select-none';
+                    div.innerHTML = `
+                      <div class="w-16 h-16 rounded-2xl bg-[#141626] border border-orange-500/20 text-orange-400 flex items-center justify-center mb-3">
+                        <svg class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                      </div>
+                      <span class="text-sm font-bold text-white mb-1">Camera Feed Inactive</span>
+                      <span class="text-xs text-zinc-400 font-mono">Stream Signal Offline · No Signal Received</span>
+                    `;
+                    parent.appendChild(div);
+                  }
                 }}
               />
             </div>
@@ -4213,6 +4354,44 @@ function DashboardContent() {
           </div>
         </div>
       )}
+
+      {/* Custom Delete Camera Confirmation Dialog (Matches Image 2) */}
+      <CustomConfirmDialog
+        isOpen={!!cameraToDelete}
+        title="Delete Camera?"
+        message={
+          <>
+            Are you sure you want to delete camera <strong className="text-foreground">&ldquo;{cameraToDelete?.cameraKey}&rdquo;</strong>{cameraToDelete?.name && cameraToDelete.name !== cameraToDelete.cameraKey ? ` (${cameraToDelete.name})` : ''}? This action cannot be undone and will stop AI alerting for this camera node.
+          </>
+        }
+        confirmText="Delete Camera"
+        cancelText="Cancel"
+        variant="danger"
+        isLoading={isDeletingCamera}
+        onConfirm={confirmDeleteCamera}
+        onCancel={() => {
+          if (!isDeletingCamera) setCameraToDelete(null);
+        }}
+      />
+
+      {/* Universal Custom Alert Modal */}
+      <CustomConfirmDialog
+        isOpen={!!customAlert?.isOpen}
+        title={customAlert?.title || 'Notice'}
+        message={customAlert?.message || ''}
+        confirmText={customAlert?.confirmText || 'OK'}
+        cancelText={customAlert?.cancelText}
+        variant={customAlert?.variant || 'info'}
+        hideCancel={!customAlert?.onCancel}
+        onConfirm={() => {
+          if (customAlert?.onConfirm) customAlert.onConfirm();
+          setCustomAlert(null);
+        }}
+        onCancel={() => {
+          if (customAlert?.onCancel) customAlert.onCancel();
+          setCustomAlert(null);
+        }}
+      />
 
     </div>
   );

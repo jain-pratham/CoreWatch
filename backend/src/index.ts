@@ -256,8 +256,8 @@ app.post("/api/seed", async (req: Request, res: Response) => {
   }
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = Number(process.env.PORT) || 5050;
 
-server.listen(PORT, () => {
+server.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running in ${process.env.NODE_ENV || "development"} mode on port ${PORT}`); // reload
 });

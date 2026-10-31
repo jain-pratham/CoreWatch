@@ -28,7 +28,7 @@ function VerifyEmailForm() {
     setSuccessMsg(null);
     setLoading(true);
 
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5050';
 
     try {
       const res = await fetch(`${API_URL}/api/auth/verify-email`, {

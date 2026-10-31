@@ -21,6 +21,7 @@ interface TestCameraConnectModalProps {
   isOpen: boolean;
   onClose: () => void;
   userToken: string;
+  cameras?: any[];
   currentStreamUrl?: string;
   activeCameraKey?: string;
   onSuccess: (connectedCamera: any) => void;
@@ -30,6 +31,7 @@ export default function TestCameraConnectModal({
   isOpen,
   onClose,
   userToken,
+  cameras = [],
   currentStreamUrl = '',
   activeCameraKey,
   onSuccess,
@@ -39,6 +41,13 @@ export default function TestCameraConnectModal({
   const [cameraName, setCameraName] = useState('Direct Test Camera');
   const [isConnecting, setIsConnecting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+
+  // Check if current streamUrl matches any already registered camera
+  const cleanInputUrl = streamUrl.trim().toLowerCase();
+  const existingCamera = cameras?.find((c) => {
+    const cStream = (c.streamUrl || c.rtspUrl || '').trim().toLowerCase();
+    return cleanInputUrl && cStream === cleanInputUrl;
+  });
 
   useEffect(() => {
     if (isOpen) {
@@ -61,10 +70,21 @@ export default function TestCameraConnectModal({
       return;
     }
 
+    // If trying to add as a new camera but URL is already registered, reject duplicate
+    if (createNew && existingCamera) {
+      setStatusMessage({
+        type: 'error',
+        text: `Camera with this Stream URL already exists as "${existingCamera.name || 'Camera'}" (${existingCamera.cameraKey}). To add a new camera node, please enter a different stream URL.`,
+      });
+      return;
+    }
+
     setIsConnecting(true);
     setStatusMessage({ type: 'info', text: 'Connecting camera feed to AI inference pipeline...' });
 
     try {
+      const targetCameraKey = existingCamera ? existingCamera.cameraKey : activeCameraKey;
+
       const res = await fetch('/api/cameras/direct-connect', {
         method: 'POST',
         headers: {
@@ -74,8 +94,8 @@ export default function TestCameraConnectModal({
         body: JSON.stringify({
           streamUrl: cleanUrl,
           name: cameraName.trim() || 'Direct Test Camera',
-          cameraKey: activeCameraKey,
-          createNew,
+          cameraKey: targetCameraKey,
+          createNew: createNew && !existingCamera,
         }),
       });
 
@@ -84,7 +104,9 @@ export default function TestCameraConnectModal({
       if (res.ok && data.success && data.data) {
         setStatusMessage({
           type: 'success',
-          text: `Camera connected successfully! Real-time stream is live.`,
+          text: existingCamera 
+            ? `Switched to existing camera ${existingCamera.cameraKey}! Stream is live.` 
+            : `Camera connected successfully! Real-time stream is live.`,
         });
 
         // Trigger parent callback
@@ -209,6 +231,33 @@ export default function TestCameraConnectModal({
             <p className="text-[11px] text-slate-400 mt-1.5">
               Supports Android/iOS IP Webcam (<span className="text-orange-400 font-mono">/video</span>), RTSP (<span className="text-orange-400 font-mono">rtsp://</span>), or numeric device index.
             </p>
+
+            {/* Existing Camera Detection Alert */}
+            {existingCamera && (
+              <div className="mt-2.5 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-start gap-2.5 animate-in fade-in">
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div className="flex-1 space-y-1">
+                  <div className="font-bold flex items-center justify-between">
+                    <span>Existing Camera Registered ({existingCamera.cameraKey})</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono font-bold">
+                      Already in Grid
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    This stream URL is already attached to <span className="text-white font-semibold">{existingCamera.name || 'Camera'}</span> (<span className="text-amber-300 font-mono font-bold">{existingCamera.cameraKey}</span>).
+                  </p>
+                  {createNew ? (
+                    <p className="text-[11px] text-rose-300 font-medium">
+                      ⚠️ Duplicate prohibited: Enter a different stream URL to create a new camera node, or select "Update Active Stream" to view this existing camera.
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-emerald-300 font-medium">
+                      ✓ "Connect Camera Now" will switch to and activate this existing camera node.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Connection Mode Selection */}

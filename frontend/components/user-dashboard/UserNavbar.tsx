@@ -13,11 +13,9 @@ import {
   Menu, 
   X, 
   Shield, 
-  Key, 
   PlusCircle, 
   Lock,
   ArrowUpCircle,
-  Camera,
   Zap,
   Radio,
   ShieldAlert
@@ -31,9 +29,16 @@ export interface UserNavbarProps {
     email?: string;
     role?: string;
   } | null;
+  customer?: {
+    plan?: string;
+    company?: string;
+    status?: string;
+    cameras?: number;
+  } | null;
   onLogout: () => void;
   activeCameraKey?: string;
   isTrialUser?: boolean;
+  maxAllowedCameras?: number;
   cameraCount?: number;
   isCameraLimitReached?: boolean;
   criticalCount?: number;
@@ -46,11 +51,13 @@ export default function UserNavbar({
   activeTab,
   onSelectTab,
   user,
+  customer,
   criticalCount = 0,
   unacknowledgedCount = 0,
   onLogout,
   activeCameraKey,
   isTrialUser = false,
+  maxAllowedCameras = 1,
   cameraCount = 0,
   isCameraLimitReached = false,
   onOpenAddCamera,
@@ -62,6 +69,44 @@ export default function UserNavbar({
   const [zonesDropdownOpen, setZonesDropdownOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
   const liveCamRef = useRef<HTMLDivElement>(null);
+
+  // Real plan state with localStorage and API fetch fallback
+  const [localPlan, setLocalPlan] = useState<string | null>(customer?.plan || null);
+
+  useEffect(() => {
+    if (customer?.plan) {
+      setLocalPlan(customer.plan);
+      return;
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('customer');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed?.plan) {
+            setLocalPlan(parsed.plan);
+            return;
+          }
+        }
+      } catch {}
+
+      const token = (user as any)?.token || localStorage.getItem('token');
+      if (token) {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5050';
+        fetch(`${apiUrl}/api/customers/me`, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+          .then(res => res.json())
+          .then(data => {
+            if (data.success && data.data?.plan) {
+              setLocalPlan(data.data.plan);
+              localStorage.setItem('customer', JSON.stringify(data.data));
+            }
+          })
+          .catch(() => {});
+      }
+    }
+  }, [customer?.plan, user]);
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -77,11 +122,14 @@ export default function UserNavbar({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Trial restriction: In trial mode with at least 1 camera, adding camera is locked
-  const isTrialLocked = isTrialUser && (cameraCount >= 1 || isCameraLimitReached);
+  // Trial restriction: In trial mode with camera limit reached, adding camera is locked
+  const isTrialLocked = isTrialUser && (cameraCount >= maxAllowedCameras || isCameraLimitReached);
 
   const displayName = user?.name || 'teesha jain';
-  const displayRole = user?.role ? (user.role === 'admin' ? 'Company Admin' : 'Standard User') : 'Standard User';
+  const rawPlan = customer?.plan || localPlan;
+  const subscriptionType = rawPlan 
+    ? (rawPlan.toLowerCase().includes('plan') || rawPlan.toLowerCase().includes('free') ? rawPlan : `${rawPlan} Plan`)
+    : (isTrialUser ? 'Demo Free Trial' : (user?.role === 'admin' ? 'Enterprise Admin' : 'Enterprise Pro Plan'));
 
   const isLiveCamActive = ['live_camera', 'add_camera', 'all_cameras'].includes(activeTab);
 
@@ -94,16 +142,16 @@ export default function UserNavbar({
           <div className="flex items-center gap-6">
             <button 
               onClick={() => onSelectTab('dashboard')}
-              className="flex items-center gap-2.5 text-left group cursor-pointer focus:outline-none"
+              className="flex items-center gap-2.5 text-left group cursor-pointer focus:outline-none select-none"
             >
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-[#ea580c] to-[#f97316] flex items-center justify-center text-white shadow-md shadow-orange-950/40">
-                <Camera className="w-4.5 h-4.5" />
-              </div>
-              <div className="flex flex-col">
-                <span className="text-lg font-bold tracking-tight text-white group-hover:text-orange-400 transition-colors">
-                  Time Lapse
-                </span>
-              </div>
+              <img 
+                src="/logo.png" 
+                alt="CoreWatch Logo" 
+                className="h-10 w-auto object-contain transition-transform duration-200 group-hover:scale-105 drop-shadow-[0_2px_8px_rgba(59,130,246,0.3)]" 
+              />
+              <span className="text-xl font-black tracking-tight text-white group-hover:text-orange-400 transition-colors">
+                CoreWatch
+              </span>
             </button>
 
             {/* DESKTOP NAV TABS (Camera Hub is removed; Live Camera has Add Camera submenu) */}
@@ -186,17 +234,17 @@ export default function UserNavbar({
                       <div
                         onClick={() => {
                           setLiveCamDropdownOpen(false);
-                          onSelectTab('subscription_detail');
+                          onSelectTab('billing');
                         }}
                         className="w-full flex items-center justify-between px-3.5 py-2 text-xs text-left text-slate-400 hover:text-amber-400 hover:bg-amber-500/10 transition-colors cursor-pointer group"
-                        title="Trial plan allows 1 camera node only. Click to upgrade your quota."
+                        title={`Plan quota reached (${cameraCount}/${maxAllowedCameras} nodes). Click to upgrade your quota.`}
                       >
                         <div className="flex items-center gap-2.5">
                           <Lock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                           <span className="text-slate-300 group-hover:text-amber-300 font-medium">Add Camera</span>
                         </div>
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-1">
-                          <Lock className="w-2.5 h-2.5" /> 1/1
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-1 font-mono">
+                          <Lock className="w-2.5 h-2.5" /> {cameraCount}/{maxAllowedCameras}
                         </span>
                       </div>
                     ) : (
@@ -254,23 +302,7 @@ export default function UserNavbar({
                 )}
               </button>
 
-              {/* 4. Event History */}
-              <button
-                onClick={() => onSelectTab('event_history')}
-                className={`relative flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer ${
-                  activeTab === 'event_history'
-                    ? 'text-[#f97316] font-bold'
-                    : 'text-slate-300 hover:text-white hover:bg-white/5'
-                }`}
-              >
-                <History className={`w-3.5 h-3.5 ${activeTab === 'event_history' ? 'text-[#f97316]' : 'text-slate-400'}`} />
-                <span>Event History</span>
-                {activeTab === 'event_history' && (
-                  <span className="absolute bottom-[-11px] left-2 right-2 h-0.5 bg-[#f97316] rounded-full shadow-[0_0_8px_#f97316]" />
-                )}
-              </button>
-
-              {/* 5. Security Incident Center */}
+              {/* Security Incident Center */}
               <button
                 onClick={() => onSelectTab('notification')}
                 className={`relative flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer ${
@@ -342,8 +374,8 @@ export default function UserNavbar({
                   <span className="text-xs font-bold text-white leading-tight">
                     {displayName}
                   </span>
-                  <span className="text-[10px] text-slate-400 font-medium">
-                    {displayRole}
+                  <span className="text-[10px] text-orange-400 font-semibold">
+                    {subscriptionType}
                   </span>
                 </div>
                 <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${profileOpen ? 'rotate-180' : ''}`} />
@@ -357,9 +389,9 @@ export default function UserNavbar({
                   <div className="px-5 pb-3 border-b border-[#252942] space-y-1.5">
                     <p className="text-sm font-bold text-white tracking-tight">{displayName}</p>
                     <p className="text-xs text-slate-400 font-mono truncate">{user?.email || 'user@corewatch.ai'}</p>
-                    <div className="pt-1">
+                    <div className="pt-1 flex items-center gap-2">
                       <span className="inline-block px-3 py-1 rounded-full text-[11px] font-bold bg-[#382618] text-[#f97316] border border-[#59381c]">
-                        {displayRole}
+                        {subscriptionType}
                       </span>
                     </div>
                   </div>
@@ -378,32 +410,12 @@ export default function UserNavbar({
 
                     <button
                       onClick={() => {
-                        onSelectTab('invoices');
+                        onSelectTab('billing');
                         setProfileOpen(false);
                       }}
                       className="w-full flex items-center px-3.5 py-2.5 rounded-xl hover:bg-white/5 hover:text-white transition-colors text-left cursor-pointer font-medium"
                     >
-                      <span>Billing & Invoices</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        onSelectTab('subscription_detail');
-                        setProfileOpen(false);
-                      }}
-                      className="w-full flex items-center px-3.5 py-2.5 rounded-xl hover:bg-white/5 hover:text-white transition-colors text-left cursor-pointer font-medium"
-                    >
-                      <span>Subscription & Plan</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        onSelectTab('settings');
-                        setProfileOpen(false);
-                      }}
-                      className="w-full flex items-center px-3.5 py-2.5 rounded-xl hover:bg-white/5 hover:text-white transition-colors text-left cursor-pointer font-medium"
-                    >
-                      <span>AI Camera Key Settings</span>
+                      <span>Subscription & Billing</span>
                     </button>
 
                     <button
@@ -497,7 +509,7 @@ export default function UserNavbar({
                 <div
                   onClick={() => {
                     setMobileMenuOpen(false);
-                    onSelectTab('subscription_detail');
+                    onSelectTab('billing');
                   }}
                   className="flex items-center justify-between px-3 py-1.5 text-[11px] text-slate-400 hover:text-amber-300 cursor-pointer"
                 >
@@ -505,7 +517,7 @@ export default function UserNavbar({
                     <Lock className="w-3 h-3 text-amber-500" />
                     <span>Add Camera (Locked)</span>
                   </span>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">Trial 1/1</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-mono">{cameraCount}/{maxAllowedCameras}</span>
                 </div>
               ) : (
                 <button
@@ -535,21 +547,6 @@ export default function UserNavbar({
           >
             <Map className="w-4 h-4 text-slate-400" />
             <span>Security Zones</span>
-          </button>
-
-          <button
-            onClick={() => {
-              onSelectTab('event_history');
-              setMobileMenuOpen(false);
-            }}
-            className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition-colors text-left ${
-              activeTab === 'event_history'
-                ? 'bg-orange-500/15 text-[#f97316] font-bold border border-orange-500/20'
-                : 'text-slate-300 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <History className="w-4 h-4 text-slate-400" />
-            <span>Event History</span>
           </button>
 
           <button

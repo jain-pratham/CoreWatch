@@ -4,7 +4,8 @@ import ZoneList from "./ZoneList";
 import ZoneForm from "./ZoneForm";
 import DeleteZoneDialog from "./DeleteZoneDialog";
 import ZoneEmptyState from "./ZoneEmptyState";
-import { AlertCircle, CheckCircle, Video, Plus } from "lucide-react";
+import CustomConfirmDialog from "../common/CustomConfirmDialog";
+import { AlertCircle, CheckCircle, Video, Plus, Camera, VideoOff } from "lucide-react";
 import { Point, IZone, ICamera, IUser } from "./types";
 
 interface ZoneManagementViewProps {
@@ -13,6 +14,7 @@ interface ZoneManagementViewProps {
   activeCameraKey: string;
   setActiveCameraKey: (key: string) => void;
   apiUrl: string;
+  onNavigateToLiveCamera?: () => void;
 }
 
 export default function ZoneManagementView({
@@ -21,6 +23,7 @@ export default function ZoneManagementView({
   activeCameraKey,
   setActiveCameraKey,
   apiUrl,
+  onNavigateToLiveCamera,
 }: ZoneManagementViewProps) {
   // Lists & Selected states
   const [zones, setZones] = useState<IZone[]>([]);
@@ -33,6 +36,7 @@ export default function ZoneManagementView({
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [pendingZoneToSelect, setPendingZoneToSelect] = useState<IZone | null>(null);
 
   // Drawing & Editing states
   const [isDrawing, setIsDrawing] = useState(false);
@@ -43,8 +47,15 @@ export default function ZoneManagementView({
   // Permissions UX
   const canManage = user?.role === "admin" || user?.role === "user";
 
-  const activeCamera = cameras.find((cam) => cam.cameraKey === activeCameraKey);
-  const streamUrl = activeCamera?.streamUrl;
+  // Ensure activeCameraKey is valid
+  useEffect(() => {
+    if (cameras.length > 0 && (!activeCameraKey || !cameras.some((c) => c.cameraKey === activeCameraKey))) {
+      setActiveCameraKey(cameras[0].cameraKey);
+    }
+  }, [cameras, activeCameraKey, setActiveCameraKey]);
+
+  const activeCamera = cameras.find((cam) => cam.cameraKey === activeCameraKey) || (cameras.length > 0 ? cameras[0] : null);
+  const streamUrl = activeCamera?.streamUrl || (activeCamera ? `http://localhost:8000/api/camera/stream/${activeCamera.cameraKey}` : undefined);
 
   const showFeedback = (type: "success" | "error", message: string) => {
     if (type === "success") {
@@ -271,10 +282,10 @@ export default function ZoneManagementView({
   };
 
   const handleSelectZone = (zone: IZone) => {
-    // If drawing or editing another zone, cancel those first
+    // If drawing or editing another zone, prompt to discard
     if (isDrawing || isEditing) {
-      const confirmLeave = window.confirm("Discard unsaved drawing changes?");
-      if (!confirmLeave) return;
+      setPendingZoneToSelect(zone);
+      return;
     }
 
     setSelectedZone(zone);
@@ -282,6 +293,17 @@ export default function ZoneManagementView({
     setIsEditing(false);
     setNewPoints([]);
     setEditPoints([]);
+  };
+
+  const confirmDiscardZoneChanges = () => {
+    if (pendingZoneToSelect) {
+      setSelectedZone(pendingZoneToSelect);
+    }
+    setIsDrawing(false);
+    setIsEditing(false);
+    setNewPoints([]);
+    setEditPoints([]);
+    setPendingZoneToSelect(null);
   };
 
   const startEditing = () => {
@@ -337,7 +359,28 @@ export default function ZoneManagementView({
       )}
 
       {/* Main split work space */}
-      {loading ? (
+      {cameras.length === 0 ? (
+        <div className="flex-1 flex flex-col items-center justify-center p-12 text-center rounded-2xl border border-dashed border-border bg-card/40 max-w-lg mx-auto my-12 space-y-4 shadow-xl">
+          <div className="w-16 h-16 rounded-2xl bg-orange-500/15 text-orange-400 flex items-center justify-center mx-auto border border-orange-500/20">
+            <Camera className="w-8 h-8" />
+          </div>
+          <div className="space-y-1.5">
+            <h3 className="text-base font-bold text-foreground">No Cameras Connected</h3>
+            <p className="text-xs text-muted-foreground max-w-sm mx-auto leading-relaxed">
+              Security inspection zones, restricted areas, and perimeter rules require an active camera. Please connect an RTSP or IP camera to begin configuring safety zones.
+            </p>
+          </div>
+          {onNavigateToLiveCamera && (
+            <button
+              onClick={onNavigateToLiveCamera}
+              className="px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-bold text-xs transition-all shadow-lg cursor-pointer flex items-center gap-2 mx-auto"
+            >
+              <Camera className="w-4 h-4" />
+              <span>Connect Camera in Live Camera</span>
+            </button>
+          )}
+        </div>
+      ) : loading ? (
         <div className="flex-1 flex flex-col items-center justify-center p-12 space-y-4">
           <div className="w-8 h-8 border-3 border-brand-gold border-t-transparent rounded-full animate-spin"></div>
           <span className="text-muted-foreground font-mono text-[10px] uppercase">Retrieving camera configurations...</span>
@@ -497,6 +540,18 @@ export default function ZoneManagementView({
         onCancel={() => setShowDeleteConfirm(false)}
         onConfirm={handleDeleteZone}
         isDeleting={isDeleting}
+      />
+
+      {/* Discard Drawing Changes Dialog */}
+      <CustomConfirmDialog
+        isOpen={!!pendingZoneToSelect}
+        title="Discard Drawing Changes?"
+        message="You have unsaved polygon points plotted on the camera viewer. Are you sure you want to discard these drawing changes?"
+        confirmText="Discard Changes"
+        cancelText="Keep Editing"
+        variant="warning"
+        onConfirm={confirmDiscardZoneChanges}
+        onCancel={() => setPendingZoneToSelect(null)}
       />
     </div>
   );

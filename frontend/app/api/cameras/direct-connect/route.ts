@@ -39,9 +39,28 @@ export async function POST(request: Request) {
     const cleanStreamUrl = streamUrl.trim();
     const cameraName = (name && name.trim()) ? name.trim() : "Direct Camera Feed";
 
+    // 1. Check if user already owns any camera with this exact stream URL or RTSP URL
+    const existingCameraWithUrl = await Camera.findOne({
+      userId,
+      $or: [
+        { streamUrl: cleanStreamUrl },
+        { rtspUrl: cleanStreamUrl }
+      ]
+    });
+
     let camera: any = null;
 
     if (createNew) {
+      // If user is trying to add as a new camera but URL is identical to an existing one, prevent duplicate
+      if (existingCameraWithUrl) {
+        return NextResponse.json({
+          success: false,
+          isExisting: true,
+          existingCamera: existingCameraWithUrl.toObject(),
+          error: `This Camera Stream URL already exists as "${existingCameraWithUrl.name || 'Camera'}" (${existingCameraWithUrl.cameraKey}). To add a new camera, please enter a different stream URL.`
+        }, { status: 400 });
+      }
+
       const generatedKey = `CAM-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
       camera = await Camera.create({
         cameraKey: generatedKey,
@@ -64,49 +83,57 @@ export async function POST(request: Request) {
       });
       console.log(`🎥 [Camera Direct Connect] Provisioned new camera ${camera.cameraKey} with stream URL: ${cleanStreamUrl}`);
     } else {
-      const cleanKey = (requestedKey && requestedKey.trim()) ? requestedKey.trim() : "CAM-1F8IPF";
-
-      // 1. Check if user already owns any camera
-      camera = await Camera.findOne({ userId });
-
-      // 2. If user doesn't own a camera yet, check if cleanKey exists in collection
-      if (!camera && cleanKey) {
-        camera = await Camera.findOne({ cameraKey: cleanKey });
-      }
-
-      if (camera) {
-        // Re-assign or update camera for current user
-        camera.userId = userId as any;
-        camera.rtspUrl = cleanStreamUrl;
-        (camera as any).streamUrl = cleanStreamUrl;
-        camera.name = camera.name || cameraName;
-        camera.locationName = camera.locationName || cameraName;
+      // If an existing camera already has this exact URL, simply re-use and activate that camera
+      if (existingCameraWithUrl) {
+        camera = existingCameraWithUrl;
         camera.status = "ONLINE";
         await camera.save();
-        console.log(`🎥 [Camera Direct Connect] Updated camera ${camera.cameraKey} with stream URL: ${cleanStreamUrl}`);
+        console.log(`🎥 [Camera Direct Connect] Re-activated existing camera ${camera.cameraKey} for stream URL: ${cleanStreamUrl}`);
       } else {
-        // Create new camera record
-        const newKey = cleanKey || `CAM-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
-        camera = await Camera.create({
-          cameraKey: newKey,
-          userId,
-          name: cameraName,
-          locationName: cameraName,
-          rtspUrl: cleanStreamUrl,
-          streamUrl: cleanStreamUrl,
-          streamType: cleanStreamUrl.startsWith("rtsp://") ? "RTSP" : "IP_WEBCAM",
-          status: "ONLINE",
-          humanDetection: true,
-          zoneMonitoring: true,
-          afterHoursSecurity: true,
-          suspiciousMovement: true,
-          cameraHealth: true,
-          restrictedZoneEntry: true,
-          zoneLoiteringDwell: true,
-          valuableAreaActivity: true,
-          cashCounterActivity: true,
-        });
-        console.log(`🎥 [Camera Direct Connect] Provisioned camera ${camera.cameraKey} with stream URL: ${cleanStreamUrl}`);
+        const cleanKey = (requestedKey && requestedKey.trim()) ? requestedKey.trim() : "CAM-1F8IPF";
+
+        // Check if camera with requestedKey exists for user, or find first camera for user
+        camera = await Camera.findOne({ userId, cameraKey: cleanKey }) || await Camera.findOne({ userId });
+
+        // If user doesn't own a camera yet, check if cleanKey exists in collection
+        if (!camera && cleanKey) {
+          camera = await Camera.findOne({ cameraKey: cleanKey });
+        }
+
+        if (camera) {
+          // Re-assign or update camera for current user
+          camera.userId = userId as any;
+          camera.rtspUrl = cleanStreamUrl;
+          (camera as any).streamUrl = cleanStreamUrl;
+          camera.name = camera.name || cameraName;
+          camera.locationName = camera.locationName || cameraName;
+          camera.status = "ONLINE";
+          await camera.save();
+          console.log(`🎥 [Camera Direct Connect] Updated camera ${camera.cameraKey} with stream URL: ${cleanStreamUrl}`);
+        } else {
+          // Create new camera record
+          const newKey = cleanKey || `CAM-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+          camera = await Camera.create({
+            cameraKey: newKey,
+            userId,
+            name: cameraName,
+            locationName: cameraName,
+            rtspUrl: cleanStreamUrl,
+            streamUrl: cleanStreamUrl,
+            streamType: cleanStreamUrl.startsWith("rtsp://") ? "RTSP" : "IP_WEBCAM",
+            status: "ONLINE",
+            humanDetection: true,
+            zoneMonitoring: true,
+            afterHoursSecurity: true,
+            suspiciousMovement: true,
+            cameraHealth: true,
+            restrictedZoneEntry: true,
+            zoneLoiteringDwell: true,
+            valuableAreaActivity: true,
+            cashCounterActivity: true,
+          });
+          console.log(`🎥 [Camera Direct Connect] Provisioned camera ${camera.cameraKey} with stream URL: ${cleanStreamUrl}`);
+        }
       }
     }
 

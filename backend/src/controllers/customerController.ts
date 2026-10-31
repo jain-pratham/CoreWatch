@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
 import User from "../models/User";
 import Customer from "../models/Customer";
+import Plan from "../models/Plan";
 import { AuthenticatedRequest } from "../middleware/authMiddleware";
 
 // Helper to send professional update password/welcome email
@@ -376,6 +377,18 @@ export const getCustomerMe = async (req: AuthenticatedRequest, res: Response): P
   try {
     const userId = req.user._id;
     const customer = await Customer.findOne({ user: userId }).populate("user", "name email role");
+
+    // Automatically sync customer.cameras with the plan quota saved by Super Admin in the Plan collection
+    if (customer && customer.plan) {
+      const planDoc = await Plan.findOne({ 
+        name: { $regex: new RegExp(`^${customer.plan.trim()}$`, "i") }, 
+        isDeleted: { $ne: true } 
+      });
+      if (planDoc && typeof planDoc.maxCameras === "number" && customer.cameras !== planDoc.maxCameras) {
+        customer.cameras = planDoc.maxCameras;
+        await customer.save();
+      }
+    }
 
     res.status(200).json({
       success: true,

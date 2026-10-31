@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
   User, 
-  Key, 
   CreditCard, 
   Bell, 
   Copy, 
@@ -22,6 +21,7 @@ import {
 } from 'lucide-react';
 import { securityAudio } from '@/lib/securityAudio';
 import { nativeNotifier } from '@/lib/nativeNotifier';
+import CustomConfirmDialog from '../common/CustomConfirmDialog';
 
 interface UserSettingsViewProps {
   user: any;
@@ -42,8 +42,7 @@ export default function UserSettingsView({
   dbInvoices,
   onUpgradePlan
 }: UserSettingsViewProps) {
-  const [subTab, setSubTab] = useState<'profile' | 'key' | 'billing' | 'notifications'>('profile');
-  const [copiedKey, setCopiedKey] = useState(false);
+  const [subTab, setSubTab] = useState<'profile' | 'billing' | 'notifications'>('profile');
   const [name, setName] = useState(user?.name || 'Asha Roya');
   const [company, setCompany] = useState(user?.company || customer?.company || 'CoreWatch Safety Systems');
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -67,6 +66,7 @@ export default function UserSettingsView({
   const [notificationPermission, setNotificationPermission] = useState<string>('default');
   const [prefsSaving, setPrefsSaving] = useState(false);
   const [prefsSuccess, setPrefsSuccess] = useState(false);
+  const [prefsError, setPrefsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (nativeNotifier.isSupported()) {
@@ -118,17 +118,10 @@ export default function UserSettingsView({
         setTimeout(() => setPrefsSuccess(false), 2500);
       }
     } catch {
-      alert("Failed to save preferences.");
+      setPrefsError("Failed to save notification preferences. Please try again.");
     } finally {
       setPrefsSaving(false);
     }
-  };
-
-  const handleCopyKey = () => {
-    if (!activeCameraKey) return;
-    navigator.clipboard.writeText(activeCameraKey);
-    setCopiedKey(true);
-    setTimeout(() => setCopiedKey(false), 2000);
   };
 
   const handleSaveProfile = (e: React.FormEvent) => {
@@ -163,17 +156,6 @@ export default function UserSettingsView({
           >
             <User className="w-3.5 h-3.5" />
             <span>Profile</span>
-          </button>
-          <button
-            onClick={() => setSubTab('key')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              subTab === 'key'
-                ? 'bg-orange-500 text-white shadow-md'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Key className="w-3.5 h-3.5" />
-            <span>AI Camera Key</span>
           </button>
           <button
             onClick={() => setSubTab('billing')}
@@ -272,61 +254,7 @@ export default function UserSettingsView({
         </div>
       )}
 
-      {/* VIEW 2: AI CAMERA KEY CONFIGURATION */}
-      {subTab === 'key' && (
-        <div className="max-w-2xl border border-[#27293d] bg-[#181926] rounded-2xl p-6 shadow-xl space-y-5">
-          <div className="flex items-center gap-3 pb-3 border-b border-[#27293d]">
-            <div className="w-9 h-9 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center">
-              <Key className="w-4.5 h-4.5" />
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-white">Active Camera Key</h3>
-              <p className="text-xs text-slate-400">Unique cryptographic authentication token for your AI microservice edge agent.</p>
-            </div>
-          </div>
-
-          <div className="p-4 rounded-xl bg-[#121422] border border-[#27293d] space-y-3">
-            <span className="text-xs font-bold text-slate-300 block">
-              Configure this key in your AI Service .env file (CAMERA_KEY)
-            </span>
-
-            {activeCameraKey ? (
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  readOnly
-                  value={activeCameraKey}
-                  className="flex-1 px-4 py-2.5 rounded-xl border border-[#2b2e46] bg-[#1a1d2e] text-orange-400 text-xs font-mono font-bold focus:outline-none"
-                />
-                <button
-                  onClick={handleCopyKey}
-                  className="px-4 py-2.5 rounded-xl text-xs font-bold bg-orange-500 hover:bg-orange-400 text-white transition-all cursor-pointer shadow-md flex items-center gap-1.5"
-                >
-                  {copiedKey ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                  <span>{copiedKey ? 'Copied!' : 'Copy Key'}</span>
-                </button>
-              </div>
-            ) : (
-              <div className="text-xs text-slate-400 font-mono">Generating unique key...</div>
-            )}
-          </div>
-
-          <div className="p-4 rounded-xl bg-[#202742]/40 border border-[#2e375c] text-xs text-slate-300 space-y-2">
-            <span className="font-bold text-[#4d7cfe] flex items-center gap-1.5">
-              <Shield className="w-4 h-4" /> Instructions for Python AI Service
-            </span>
-            <p className="text-[11px] text-slate-400 leading-relaxed font-mono">
-              Open <span className="text-white">ai-service/.env</span> and ensure:
-              <br />
-              <span className="text-orange-400">CAMERA_KEY={activeCameraKey || 'YOUR_KEY_HERE'}</span>
-              <br />
-              <span className="text-slate-400">BACKEND_URL=http://localhost:5000</span>
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* VIEW 3: SUBSCRIPTION & BILLING */}
+      {/* VIEW 2: SUBSCRIPTION & BILLING */}
       {subTab === 'billing' && (
         <div className="max-w-3xl space-y-6">
           <div className="border border-[#27293d] bg-[#181926] rounded-2xl p-6 shadow-xl space-y-4">
@@ -677,6 +605,17 @@ export default function UserSettingsView({
 
         </form>
       )}
+
+      {/* Preferences Error Modal */}
+      <CustomConfirmDialog
+        isOpen={!!prefsError}
+        title="Settings Error"
+        message={prefsError || ''}
+        confirmText="OK"
+        variant="danger"
+        hideCancel
+        onConfirm={() => setPrefsError(null)}
+      />
 
     </div>
   );

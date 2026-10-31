@@ -21,7 +21,9 @@ import {
   Zap,
   ArrowUpCircle,
   Play,
-  Radio
+  Radio,
+  VideoOff,
+  RotateCw
 } from 'lucide-react';
 
 interface UserCameraManagementViewProps {
@@ -63,6 +65,15 @@ export default function UserCameraManagementView({
   const [searchQuery, setSearchQuery] = useState('');
   const [mfgFilter, setMfgFilter] = useState('ALL');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [streamErrors, setStreamErrors] = useState<Record<string, boolean>>({});
+
+  const handleStreamError = (key: string) => {
+    setStreamErrors((prev) => ({ ...prev, [key]: true }));
+  };
+
+  const handleRetryStream = (key: string) => {
+    setStreamErrors((prev) => ({ ...prev, [key]: false }));
+  };
 
   const filteredCameras = cameras.filter((cam) => {
     const matchesSearch =
@@ -110,15 +121,17 @@ export default function UserCameraManagementView({
           )}
 
           {/* Add Camera Button (Disabled with Lock for Trial limit) */}
-          {isTrialUser && (cameras.length >= 1 || isCameraLimitReached) ? (
+          {isTrialUser && (cameras.length >= maxAllowedCameras || isCameraLimitReached) ? (
             <button
-              onClick={() => onNavigateTab('subscription_detail')}
+              onClick={() => onNavigateTab('billing')}
               className="px-4 py-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 hover:bg-amber-500/25 font-bold text-xs shadow-md flex items-center gap-2 cursor-pointer transition-all"
-              title="Trial allows 1 camera only. Upgrade to connect more cameras."
+              title={`Plan quota reached (${cameras.length}/${maxAllowedCameras} nodes). Upgrade to connect more cameras.`}
             >
               <Lock className="w-3.5 h-3.5 text-amber-500" />
               <span>Add Camera (Locked)</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-mono">1/1 Node</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono">
+                {cameras.length}/{maxAllowedCameras} Nodes
+              </span>
             </button>
           ) : (
             <button
@@ -141,18 +154,18 @@ export default function UserCameraManagementView({
             </div>
             <div>
               <div className="text-xs font-bold text-white flex items-center gap-2">
-                <span>Free Trial Active (Demo Free)</span>
+                <span>Free Trial Active ({customer?.plan || 'Demo Free'})</span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold">
-                  {cameras.length}/{maxAllowedCameras} Camera Connected
+                  {cameras.length}/{maxAllowedCameras} Camera{maxAllowedCameras > 1 ? 's' : ''} Connected
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                Your trial account includes 1 high-definition camera stream. Upgrade to Enterprise to connect up to 50 concurrent feeds.
+                Your {customer?.plan || 'Demo Free'} plan includes {maxAllowedCameras} high-definition camera stream{maxAllowedCameras > 1 ? 's' : ''}. Upgrade to connect more concurrent feeds.
               </p>
             </div>
           </div>
           <button
-            onClick={() => onNavigateTab('settings')}
+            onClick={() => onNavigateTab('billing')}
             className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs transition-all cursor-pointer shrink-0 shadow-sm flex items-center gap-1.5"
           >
             <ArrowUpCircle className="w-3.5 h-3.5" />
@@ -166,55 +179,109 @@ export default function UserCameraManagementView({
         <div className="space-y-6">
           {cameras.length > 0 ? (
             <div className={`grid grid-cols-1 ${cameras.length > 1 ? 'md:grid-cols-2' : 'max-w-4xl mx-auto'} gap-6`}>
-              {cameras.map((camera) => (
-                <div 
-                  key={camera._id || camera.cameraKey} 
-                  className="relative aspect-video w-full bg-[#0a0c16] rounded-2xl border border-[#27293d] overflow-hidden shadow-2xl group select-none hover:border-orange-500/50 transition-all duration-300"
-                >
-                  {/* Grid overlay & scanlines */}
-                  <div className="absolute inset-0 pointer-events-none z-10 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[size:100%_4px,3px_100%] opacity-35" />
-                  <div className="absolute inset-0 pointer-events-none z-10 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,0.6)_100%)]" />
+              {cameras.map((camera) => {
+                const isOffline = !!streamErrors[camera.cameraKey];
+                return (
+                  <div 
+                    key={camera._id || camera.cameraKey} 
+                    className="relative aspect-video w-full bg-[#0a0c16] rounded-2xl border border-[#27293d] overflow-hidden shadow-2xl group select-none hover:border-orange-500/50 transition-all duration-300"
+                  >
+                    {/* Grid overlay & scanlines */}
+                    <div className="absolute inset-0 pointer-events-none z-10 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[size:100%_4px,3px_100%] opacity-35" />
+                    <div className="absolute inset-0 pointer-events-none z-10 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,0.6)_100%)]" />
 
-                  {/* HUD Metadata Overlay */}
-                  <div className="absolute top-4 left-4 font-mono text-[9px] text-slate-300 bg-[#121424]/90 border border-[#27293d] px-2.5 py-1.5 rounded-lg z-20 space-y-0.5 shadow-lg backdrop-blur-sm">
-                    <div className="flex items-center gap-1.5 font-bold text-white">
-                      <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                      <span>{(camera.locationName || camera.name || 'CCTV NODE').toUpperCase()} ({camera.cameraKey})</span>
+                    {/* HUD Metadata Overlay */}
+                    <div className="absolute top-4 left-4 font-mono text-[9px] text-slate-300 bg-[#121424]/90 border border-[#27293d] px-2.5 py-1.5 rounded-lg z-20 space-y-0.5 shadow-lg backdrop-blur-sm">
+                      <div className="flex items-center gap-1.5 font-bold text-white">
+                        <span className={`w-2 h-2 rounded-full ${!isOffline ? "bg-emerald-500 animate-pulse" : "bg-rose-500"}`} />
+                        <span>{(camera.locationName || camera.name || 'CCTV NODE').toUpperCase()} ({camera.cameraKey})</span>
+                        <span className={`text-[8px] px-1.5 py-0.5 rounded font-black tracking-wider uppercase ${!isOffline ? "text-emerald-400 bg-emerald-500/10 border border-emerald-500/20" : "text-amber-400 bg-amber-500/10 border border-amber-500/20"}`}>
+                          {!isOffline ? "ONLINE" : "OFFLINE"}
+                        </span>
+                      </div>
+                      <div>1920 × 1080 @ 30FPS · H.264 RTSP</div>
+                      <div className={!isOffline ? "text-emerald-400 font-bold" : "text-amber-400 font-bold"}>
+                        {!isOffline ? "● AI OVERLAY ACTIVE" : "○ FEED DISCONNECTED"}
+                      </div>
                     </div>
-                    <div>1920 × 1080 @ 30FPS · H.264 RTSP</div>
-                    <div className="text-emerald-400 font-bold">● AI OVERLAY ACTIVE</div>
-                  </div>
 
-                  {/* Top Right Controls */}
-                  <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
-                    <button
-                      onClick={() => openSettingsModal(camera)}
-                      className="p-1.5 rounded-lg bg-[#121424]/90 border border-[#27293d] text-slate-300 hover:text-white hover:bg-orange-500 transition-colors cursor-pointer"
-                      title="AI Settings"
-                    >
-                      <Settings className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => openViewModal(camera)}
-                      className="p-1.5 rounded-lg bg-[#121424]/90 border border-[#27293d] text-slate-300 hover:text-white hover:bg-orange-500 transition-colors cursor-pointer"
-                      title="Fullscreen"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                    {/* Top Right Controls */}
+                    <div className="absolute top-4 right-4 z-30 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openSettingsModal(camera);
+                        }}
+                        className="p-1.5 rounded-lg bg-[#121424]/90 border border-[#27293d] text-slate-300 hover:text-white hover:bg-orange-500 transition-colors cursor-pointer"
+                        title="AI Settings"
+                      >
+                        <Settings className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openViewModal(camera);
+                        }}
+                        className="p-1.5 rounded-lg bg-[#121424]/90 border border-[#27293d] text-slate-300 hover:text-white hover:bg-orange-500 transition-colors cursor-pointer"
+                        title="Fullscreen"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteCamera(camera.cameraKey);
+                        }}
+                        className="p-1.5 rounded-lg bg-[#121424]/90 border border-[#27293d] text-slate-400 hover:text-rose-400 hover:border-rose-500/40 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                        title="Delete Camera"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
 
-                  {/* MJPEG Stream Image */}
-                  <img 
-                    src={`http://localhost:8000/api/camera/stream/${camera.cameraKey}`}
-                    alt={`CCTV Stream - ${camera.locationName || camera.name}`}
-                    className="w-full h-full object-contain relative z-0"
-                    onError={(e) => {
-                      // Fallback to crisp high-res mock
-                      (e.target as HTMLImageElement).src = "/uploads/warehouse.jpg";
-                    }}
-                  />
-                </div>
-              ))}
+                    {/* Stream Content: Live MJPEG Stream or Clean Offline Indicator (No fake demo) */}
+                    {!isOffline ? (
+                      <img 
+                        src={`http://localhost:8000/api/camera/stream/${camera.cameraKey}`}
+                        alt={`CCTV Stream - ${camera.locationName || camera.name}`}
+                        className="w-full h-full object-contain relative z-0"
+                        onError={() => handleStreamError(camera.cameraKey)}
+                      />
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center justify-center text-center p-6 space-y-3 bg-[#080914] relative z-0 select-none">
+                        <div className="w-14 h-14 rounded-2xl bg-[#121424] border border-orange-500/20 text-orange-400 flex items-center justify-center shadow-lg">
+                          <VideoOff className="w-7 h-7" />
+                        </div>
+                        <div className="space-y-1 max-w-xs">
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-rose-500/10 border border-rose-500/25 text-rose-400 text-[9px] font-mono font-bold tracking-wider uppercase mb-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+                            Live Feed Inactive
+                          </div>
+                          <h4 className="text-xs font-bold text-white tracking-wide">
+                            Camera Offline / No Signal
+                          </h4>
+                          <p className="text-[10px] text-slate-400 leading-relaxed font-mono">
+                            {camera.ipAddress ? `${camera.ipAddress}:${camera.port || 554}` : (camera.rtspUrl || camera.cameraKey)}
+                          </p>
+                          <p className="text-[10px] text-slate-400 leading-relaxed">
+                            RTSP stream is not transmitting data or unreachable.
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleRetryStream(camera.cameraKey)}
+                          className="px-3 py-1.5 rounded-lg bg-[#181a2e] hover:bg-[#20233d] border border-[#2b2f4c] text-zinc-300 hover:text-white text-[10px] font-semibold transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm active:scale-95"
+                        >
+                          <RotateCw className="w-3 h-3" />
+                          <span>Retry Stream</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <div className="p-12 rounded-2xl border border-dashed border-[#27293d] bg-[#181926]/40 text-center space-y-4 max-w-lg mx-auto shadow-md">
@@ -315,22 +382,34 @@ export default function UserCameraManagementView({
                         {cam.rtspUrl || `rtsp://.../${cam.cameraKey}`}
                       </td>
                       <td className="py-3 px-4">
-                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                          ONLINE
+                        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          !streamErrors[cam.cameraKey]
+                            ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
+                            : "bg-rose-500/15 text-rose-400 border border-rose-500/30"
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${!streamErrors[cam.cameraKey] ? "bg-emerald-400" : "bg-rose-400"}`} />
+                          {!streamErrors[cam.cameraKey] ? "ONLINE" : "OFFLINE"}
                         </span>
                       </td>
                       <td className="py-3 px-4 text-right">
                         <div className="flex items-center justify-end gap-2">
                           <button
-                            onClick={() => openSettingsModal(cam)}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openSettingsModal(cam);
+                            }}
                             className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white cursor-pointer"
                             title="Camera AI Settings"
                           >
                             <Settings className="w-3.5 h-3.5" />
                           </button>
                           <button
-                            onClick={() => handleDeleteCamera(cam.cameraKey)}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteCamera(cam.cameraKey);
+                            }}
                             className="p-1.5 rounded-lg hover:bg-red-500/15 text-slate-400 hover:text-red-400 cursor-pointer"
                             title="Delete Camera"
                           >

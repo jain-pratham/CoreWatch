@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import CustomConfirmDialog from '../../components/common/CustomConfirmDialog';
 
 export default function SignupPage() {
   const router = useRouter();
@@ -10,6 +11,7 @@ export default function SignupPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [signupSuccess, setSignupSuccess] = useState(false);
+  const [showTermsDialog, setShowTermsDialog] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     fullName: '',
@@ -209,7 +211,7 @@ export default function SignupPage() {
                 />
                 <label htmlFor="agree-terms" className="text-xs text-muted-foreground select-none leading-relaxed">
                   I agree to the{' '}
-                  <a href="#" onClick={(e) => { e.preventDefault(); alert("Displaying Terms of Service..."); }} className="text-brand-gold-light hover:text-brand-gold hover:underline">Terms of Service</a>.
+                  <a href="#" onClick={(e) => { e.preventDefault(); setShowTermsDialog(true); }} className="text-brand-gold-light hover:text-brand-gold hover:underline">Terms of Service</a>.
                 </label>
               </div>
 
@@ -367,6 +369,16 @@ export default function SignupPage() {
         </div>
 
       </div>
+
+      <CustomConfirmDialog
+        isOpen={showTermsDialog}
+        title="Terms of Service"
+        message="CoreWatch enterprise policies govern AI camera safety inspection, zone violation alerting, and secure biometric feed management in full compliance with data protection standards."
+        confirmText="Understood"
+        variant="info"
+        hideCancel
+        onConfirm={() => setShowTermsDialog(false)}
+      />
 
     </div>
   );

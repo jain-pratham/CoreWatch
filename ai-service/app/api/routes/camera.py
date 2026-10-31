@@ -70,6 +70,11 @@ def gen_frames(camera_key: str):
 
     while True:
         runtime = camera_manager.get_runtime(camera_key)
+        # If specific key runtime not found, fallback to active camera runtime if available
+        if not runtime and len(camera_manager.runtimes) > 0:
+            active_fallback_key = next(iter(camera_manager.runtimes))
+            runtime = camera_manager.get_runtime(active_fallback_key)
+
         if runtime:
             is_offline = getattr(runtime.offline_detector, 'is_offline', True)
             frame = runtime.last_annotated_frame

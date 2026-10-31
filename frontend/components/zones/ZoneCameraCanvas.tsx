@@ -1,5 +1,5 @@
-import React, { useRef, useState } from "react";
-import { Undo2, X, Check, Trash2 } from "lucide-react";
+import React, { useRef, useState, useEffect } from "react";
+import { Undo2, X, Check, Trash2, VideoOff, RotateCw } from "lucide-react";
 
 import { Point, IZone } from "./types";
 
@@ -50,6 +50,11 @@ export default function ZoneCameraCanvas({
   const svgRef = useRef<SVGSVGElement>(null);
   const [mousePos, setMousePos] = useState<Point | null>(null);
   const [draggedPointIndex, setDraggedPointIndex] = useState<number | null>(null);
+  const [streamOffline, setStreamOffline] = useState(false);
+
+  useEffect(() => {
+    setStreamOffline(false);
+  }, [streamUrl, activeCameraKey]);
 
   const getNormalizedCoords = (e: React.PointerEvent<SVGSVGElement>) => {
     if (!svgRef.current) return { x: 0, y: 0 };
@@ -124,15 +129,59 @@ export default function ZoneCameraCanvas({
         <div className="absolute inset-0 pointer-events-none z-10 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,0.4)_100%)]"></div>
 
         {/* High-tech security grid when empty */}
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(120,93,50,0.04)_1px,transparent_1px),linear-gradient(to_bottom,rgba(120,93,50,0.04)_1px,transparent_1px)] bg-[size:32px_32px]"></div>
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(120,93,50,0.06)_1px,transparent_1px),linear-gradient(to_bottom,rgba(120,93,50,0.06)_1px,transparent_1px)] bg-[size:32px_32px]"></div>
+
+        {/* Camera Live Stream OR Clean Offline State (No fake demo fallback) */}
+        <div className="absolute inset-0 z-0 flex items-center justify-center bg-[#070913] overflow-hidden">
+          {streamUrl && !streamOffline ? (
+            <img
+              src={streamUrl}
+              alt={`Live Camera Feed - ${activeCameraKey}`}
+              className="w-full h-full object-contain"
+              onError={() => setStreamOffline(true)}
+              onLoad={() => setStreamOffline(false)}
+            />
+          ) : (
+            <div className="w-full h-full flex flex-col items-center justify-center text-center p-6 space-y-3 select-none relative z-0">
+              <div className="w-14 h-14 rounded-2xl bg-[#121424] border border-orange-500/20 text-orange-400 flex items-center justify-center shadow-lg">
+                <VideoOff className="w-7 h-7" />
+              </div>
+              <div className="space-y-1 max-w-sm">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-rose-500/10 border border-rose-500/25 text-rose-400 text-[9px] font-mono font-bold tracking-wider uppercase mb-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+                  Camera Feed Inactive
+                </div>
+                <h4 className="text-xs font-bold text-white tracking-wide">
+                  {activeCameraKey ? `Stream Signal Offline (${activeCameraKey})` : "No Stream Available"}
+                </h4>
+                <p className="text-[10px] text-zinc-400 leading-relaxed">
+                  Live RTSP / MJPEG feed is not transmitting frames. Security inspection zones can still be plotted, calibrated, and saved on this coordinate grid.
+                </p>
+              </div>
+              {streamUrl && (
+                <button
+                  type="button"
+                  onClick={() => setStreamOffline(false)}
+                  className="px-3.5 py-1.5 rounded-lg bg-[#181a2e] hover:bg-[#20233d] border border-[#2b2f4c] text-zinc-300 hover:text-white text-[10px] font-semibold transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm active:scale-95"
+                >
+                  <RotateCw className="w-3 h-3" />
+                  <span>Retry Stream Connection</span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* CCTV Stream details overlay */}
-        <div className="absolute top-4 left-4 font-mono text-[9px] text-zinc-400 bg-[#0A0B0E]/80 border border-[#16171D] px-2.5 py-1.5 rounded-lg z-20 space-y-0.5">
+        <div className="absolute top-4 left-4 font-mono text-[9px] text-zinc-400 bg-[#0A0B0E]/85 border border-[#16171D] px-2.5 py-1.5 rounded-lg z-20 space-y-0.5 shadow-lg backdrop-blur-sm">
           <div className="flex items-center gap-1.5 font-bold text-zinc-100">
-            <span className="w-1.5 h-1.5 bg-red-600 rounded-full animate-pulse"></span>
-            <span>CCTV STREAM: {activeCameraKey}</span>
+            <span className={`w-1.5 h-1.5 rounded-full ${!streamOffline && streamUrl ? "bg-emerald-500 animate-pulse" : "bg-rose-500"}`}></span>
+            <span>CCTV STREAM: {activeCameraKey || "UNASSIGNED"}</span>
+            <span className={`text-[8px] px-1.5 py-0.5 rounded font-black tracking-wider uppercase ${!streamOffline && streamUrl ? "text-emerald-400 bg-emerald-500/10 border border-emerald-500/20" : "text-amber-400 bg-amber-500/10 border border-amber-500/20"}`}>
+              {!streamOffline && streamUrl ? "ONLINE" : "OFFLINE"}
+            </span>
           </div>
-          <div>1920 × 1080 @ 30FPS · H.264</div>
+          <div>1920 × 1080 @ 30FPS · RTSP/MJPEG</div>
           <div>UTC ZONE LOGGING ENGINE v1.4</div>
         </div>
 
@@ -144,8 +193,6 @@ export default function ZoneCameraCanvas({
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
         >
-          {/* Real camera view mock background */}
-          <image href={streamUrl || "/camera_feed_mock.jpg"} width="1600" height="900" x="0" y="0" opacity="0.85" />
           {zones.map((zone) => {
             if (!zone.points || zone.points.length < 3) return null;
             const isSelected = selectedZone?._id === zone._id;

@@ -7,6 +7,8 @@ import UserCameraManagementView from './UserCameraManagementView';
 import UserContentManagementView from './UserContentManagementView';
 import UserSettingsView from './UserSettingsView';
 import ZoneManagementView from '../zones/ZoneManagementView';
+import UserBillingSubscriptionView from './UserBillingSubscriptionView';
+import CustomConfirmDialog from '../common/CustomConfirmDialog';
 import TestCameraConnectModal from './TestCameraConnectModal';
 import CriticalAlertBanner from './CriticalAlertBanner';
 import SecurityAlertCenterView from './SecurityAlertCenterView';
@@ -31,7 +33,9 @@ import {
   Settings,
   Shield,
   ArrowUpCircle,
-  HardDrive
+  HardDrive,
+  VideoOff,
+  RotateCw
 } from 'lucide-react';
 
 interface UserDashboardContainerProps {
@@ -42,6 +46,7 @@ interface UserDashboardContainerProps {
   dbAlerts: any[];
   setDbAlerts?: React.Dispatch<React.SetStateAction<any[]>>;
   dbInvoices: any[];
+  dbPlans?: any[];
   activeCameraKey: string;
   setActiveCameraKey: (key: string) => void;
   isTrialUser: boolean;
@@ -101,6 +106,7 @@ export default function UserDashboardContainer({
   dbAlerts,
   setDbAlerts,
   dbInvoices,
+  dbPlans = [],
   activeCameraKey,
   setActiveCameraKey,
   isTrialUser,
@@ -151,6 +157,12 @@ export default function UserDashboardContainer({
 }: UserDashboardContainerProps) {
   const [addCameraModalOpen, setAddCameraModalOpen] = useState(false);
   const [inviteUserModalOpen, setInviteUserModalOpen] = useState(false);
+  const [inviteSuccessModal, setInviteSuccessModal] = useState(false);
+  const [fullscreenStreamError, setFullscreenStreamError] = useState(false);
+
+  useEffect(() => {
+    setFullscreenStreamError(false);
+  }, [selectedViewCamera]);
 
   // Active Critical Alert and severity counts for professional security response
   const activeCriticalAlert = useMemo(() => {
@@ -356,7 +368,8 @@ export default function UserDashboardContainer({
                 setActiveCameraKey={setActiveCameraKey}
                 cameras={cameras}
                 user={user}
-                apiUrl={process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}
+                apiUrl={process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5050'}
+                onNavigateToLiveCamera={() => setActiveTab('live_camera')}
               />
             </div>
           </div>
@@ -365,14 +378,15 @@ export default function UserDashboardContainer({
         {/* ========================================================================= */}
         {/* 5. BILLING & INVOICES & SUBSCRIPTION */}
         {/* ========================================================================= */}
-        {(activeTab === 'invoices' || activeTab === 'subscription_detail' || activeTab === 'billing') && (
-          <UserSettingsView
+        {(activeTab === 'invoices' || activeTab === 'subscription_detail' || activeTab === 'billing' || activeTab === 'subscription') && (
+          <UserBillingSubscriptionView
             user={user}
             customer={customer}
-            activeCameraKey={activeCameraKey}
-            isTrialUser={isTrialUser}
+            cameras={cameras}
             maxAllowedCameras={maxAllowedCameras}
+            isTrialUser={isTrialUser}
             dbInvoices={dbInvoices}
+            dbPlans={dbPlans}
             onUpgradePlan={() => setActiveTab('subscription_detail')}
           />
         )}
@@ -622,8 +636,8 @@ export default function UserDashboardContainer({
 
             <form onSubmit={(e) => {
               e.preventDefault();
-              alert('Invitation successfully sent to user!');
               setInviteUserModalOpen(false);
+              setInviteSuccessModal(true);
             }} className="space-y-4 pt-4">
               <div>
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
@@ -790,14 +804,42 @@ export default function UserDashboardContainer({
             </div>
 
             <div className="relative aspect-video w-full bg-black flex items-center justify-center">
-              <img
-                src={`http://localhost:8000/api/camera/stream/${selectedViewCamera.cameraKey}`}
-                alt="Camera Stream"
-                className="w-full h-full object-contain"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = '/uploads/warehouse.jpg';
-                }}
-              />
+              {!fullscreenStreamError ? (
+                <img
+                  src={`http://localhost:8000/api/camera/stream/${selectedViewCamera.cameraKey}`}
+                  alt="Camera Stream"
+                  className="w-full h-full object-contain"
+                  onError={() => setFullscreenStreamError(true)}
+                />
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center text-center p-8 space-y-3 bg-[#080914] select-none">
+                  <div className="w-16 h-16 rounded-2xl bg-[#121424] border border-orange-500/20 text-orange-400 flex items-center justify-center shadow-lg">
+                    <VideoOff className="w-8 h-8" />
+                  </div>
+                  <div className="space-y-1 max-w-sm">
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-rose-500/10 border border-rose-500/25 text-rose-400 text-[9px] font-mono font-bold tracking-wider uppercase mb-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+                      Live Feed Inactive
+                    </div>
+                    <h4 className="text-sm font-bold text-white tracking-wide">
+                      Camera Stream Offline
+                    </h4>
+                    <p className="text-xs text-slate-400 font-mono">
+                      {selectedViewCamera.ipAddress ? `${selectedViewCamera.ipAddress}:${selectedViewCamera.port || 554}` : (selectedViewCamera.rtspUrl || selectedViewCamera.cameraKey)}
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      RTSP live stream is currently not transmitting data or unreachable.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setFullscreenStreamError(false)}
+                    className="px-4 py-2 rounded-xl bg-[#181a2e] hover:bg-[#20233d] border border-[#2b2f4c] text-zinc-300 hover:text-white text-xs font-semibold transition-colors cursor-pointer flex items-center gap-2 shadow-sm"
+                  >
+                    <RotateCw className="w-3.5 h-3.5" />
+                    <span>Retry Stream Connection</span>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -811,6 +853,17 @@ export default function UserDashboardContainer({
         currentStreamUrl={currentStreamUrl}
         activeCameraKey={activeCameraKey || activeCam?.cameraKey || 'CAM-1F8IPF'}
         onSuccess={handleTestCameraSuccess}
+      />
+
+      {/* 5. USER INVITATION SUCCESS MODAL */}
+      <CustomConfirmDialog
+        isOpen={inviteSuccessModal}
+        title="Invitation Sent"
+        message="Invitation has been successfully dispatched! The team member will receive instructions to access this workspace."
+        confirmText="Done"
+        variant="success"
+        hideCancel
+        onConfirm={() => setInviteSuccessModal(false)}
       />
 
     </div>
