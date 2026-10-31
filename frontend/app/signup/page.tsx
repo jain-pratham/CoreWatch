@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import CustomConfirmDialog from '../../components/common/CustomConfirmDialog';
+import CoreWatchLogo from '../../components/common/CoreWatchLogo';
 
 export default function SignupPage() {
   const router = useRouter();
@@ -123,11 +124,7 @@ export default function SignupPage() {
         <div className="flex-1 flex flex-col justify-center max-w-sm w-full mx-auto space-y-4 py-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <img 
-                src="/logo.png" 
-                alt="CoreWatch Logo" 
-                className="h-12 w-auto object-contain shrink-0"
-              />
+              <CoreWatchLogo className="h-11 w-auto" />
               <span className="text-md font-bold tracking-tight text-foreground">CoreWatch</span>
             </div>
             <h1 className="text-xl font-black tracking-tight text-foreground">Create Account</h1>

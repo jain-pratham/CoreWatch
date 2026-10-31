@@ -410,10 +410,12 @@ export async function POST(request: Request) {
       : finalReason;
 
     // 4. Create the incident record in MongoDB
+    // Note: imageUrl starts empty because local image saving is disabled;
+    // only if an active cloud drive (Google Drive / OneDrive) is connected, it will be updated with the cloud link.
     const newAlert = await Alert.create({
       cameraKey,
       userId,
-      imageUrl: imageUrl || "",
+      imageUrl: "",
       timestamp: timestamp ? new Date(timestamp) : new Date(),
       message: message || "Security incident detected!",
       reason: finalReason,
@@ -446,8 +448,9 @@ export async function POST(request: Request) {
       })
         .then((res) => res.json())
         .then((cloudData) => {
-          if (cloudData.success && cloudData.fileId) {
+          if (cloudData.success && cloudData.fileId && cloudData.webViewLink) {
             Alert.findByIdAndUpdate(newAlert._id, {
+              imageUrl: cloudData.webViewLink,
               cloudFileId: cloudData.fileId,
               cloudViewLink: cloudData.webViewLink,
               cloudProvider: cloudData.provider,

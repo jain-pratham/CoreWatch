@@ -37,12 +37,17 @@ import {
   ArrowUpCircle,
   HardDrive,
   VideoOff,
-  RotateCw
+  RotateCw,
+  AlertTriangle,
+  Cloud,
+  ArrowRight
 } from 'lucide-react';
 
 interface UserDashboardContainerProps {
   user: any;
   customer: any;
+  setUser?: React.Dispatch<React.SetStateAction<any>>;
+  setCustomer?: React.Dispatch<React.SetStateAction<any>>;
   cameras: any[];
   setCameras: React.Dispatch<React.SetStateAction<any[]>>;
   dbAlerts: any[];
@@ -103,6 +108,8 @@ interface UserDashboardContainerProps {
 export default function UserDashboardContainer({
   user,
   customer,
+  setUser,
+  setCustomer,
   cameras,
   setCameras,
   dbAlerts,
@@ -161,6 +168,49 @@ export default function UserDashboardContainer({
   const [inviteUserModalOpen, setInviteUserModalOpen] = useState(false);
   const [inviteSuccessModal, setInviteSuccessModal] = useState(false);
   const [fullscreenStreamError, setFullscreenStreamError] = useState(false);
+
+  // Cloud Storage Active Status & Login Popup Alert
+  const [cloudDriveStatus, setCloudDriveStatus] = useState<{
+    checked: boolean;
+    isConnected: boolean;
+    activeProvider: string | null;
+  }>({ checked: false, isConnected: false, activeProvider: null });
+  const [cloudWarningModalOpen, setCloudWarningModalOpen] = useState(false);
+
+  useEffect(() => {
+    const token = user?.token || (typeof window !== 'undefined' ? localStorage.getItem('token') : '');
+    const email = user?.email || (typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('user') || '{}')?.email : '');
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5050';
+
+    if (token) {
+      fetch(`${apiUrl}/api/integrations/status`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'x-user-email': email || '',
+        },
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success) {
+            const isConn = Boolean(data.activeProvider);
+            setCloudDriveStatus({
+              checked: true,
+              isConnected: isConn,
+              activeProvider: data.activeProvider,
+            });
+
+            // Every time the user logs in / visits the dashboard, if cloud drive is NOT connected, pop up alert!
+            if (!isConn) {
+              const sessionDismissed = sessionStorage.getItem('dismissedCloudDriveNotice');
+              if (sessionDismissed !== 'true') {
+                setCloudWarningModalOpen(true);
+              }
+            }
+          }
+        })
+        .catch((e) => console.warn('Cloud drive status check note:', e));
+    }
+  }, [user?.token, user?.email, activeTab]);
 
   useEffect(() => {
     setFullscreenStreamError(false);
@@ -287,6 +337,39 @@ export default function UserDashboardContainer({
           }}
           onOpenAlertCenter={() => setActiveTab('notification')}
         />
+
+        {/* PERSISTENT CLOUD STORAGE DISCONNECTED BANNER */}
+        {cloudDriveStatus.checked && !cloudDriveStatus.isConnected && activeTab !== 'integrations' && (
+          <div className="w-full mb-6 rounded-2xl bg-gradient-to-r from-amber-950/60 via-[#211a14] to-[#161826] border border-amber-500/40 p-4 sm:p-4.5 shadow-lg shadow-amber-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in">
+            <div className="flex items-center gap-3.5">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0 shadow-inner">
+                <AlertTriangle className="w-5 h-5 text-amber-400 animate-pulse" />
+              </div>
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <h4 className="text-xs sm:text-sm font-bold text-white tracking-tight">
+                    Cloud Storage Disconnected — Evidence Images Disabled
+                  </h4>
+                  <span className="text-[10px] font-bold text-amber-400 bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/30">
+                    Text-Only Alerts Active
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300 max-w-3xl leading-relaxed">
+                  Aapka Google Drive ya Microsoft OneDrive connect nahi hai. Security alarms me khali alert message aayega, lekin photo evidence capture nahi hoga. Photo snapshots automatically archive karne ke liye Drive connect karein.
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setActiveTab('integrations')}
+              className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white text-xs font-bold shadow-md shadow-orange-500/20 transition-all cursor-pointer"
+            >
+              <Cloud className="w-3.5 h-3.5" />
+              <span>Connect Cloud Drive</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
         
         {/* ========================================================================= */}
         {/* 1. DASHBOARD OVERVIEW (NEW REFERENCE IMAGE UI) */}
@@ -427,6 +510,14 @@ export default function UserDashboardContainer({
           <UserProfileView
             user={user}
             customer={customer}
+            onProfileUpdated={(updated) => {
+              if (setUser) {
+                setUser((prev: any) => ({ ...prev, ...updated }));
+              }
+              if (setCustomer && updated.customer) {
+                setCustomer(updated.customer);
+              }
+            }}
           />
         )}
 
@@ -890,6 +981,69 @@ export default function UserDashboardContainer({
         hideCancel
         onConfirm={() => setInviteSuccessModal(false)}
       />
+
+      {/* ========================================================================= */}
+      {/* 6. CLOUD STORAGE DISCONNECTED POPUP ALERT MODAL (Appears on every login) */}
+      {/* ========================================================================= */}
+      {cloudWarningModalOpen && cloudDriveStatus.checked && !cloudDriveStatus.isConnected && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="relative w-full max-w-lg bg-[#15192c] border border-amber-500/40 rounded-2xl p-6 sm:p-7 shadow-2xl space-y-5 animate-in zoom-in-95 duration-150">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0 shadow-lg shadow-amber-500/10">
+                <AlertTriangle className="w-6 h-6 animate-pulse" />
+              </div>
+              <div className="space-y-1">
+                <span className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                  Action Required • Cloud Storage Notice
+                </span>
+                <h3 className="text-lg font-black text-white tracking-tight">
+                  Cloud Storage Not Connected
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Visual photo evidence capture is disabled
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-[#101322] border border-[#232742] p-4 space-y-2.5 text-xs text-slate-300 leading-relaxed">
+              <div className="flex items-center gap-2 text-amber-300 font-bold">
+                <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+                <span>Notice on Incident Evidence:</span>
+              </div>
+              <p>
+                Aapne Google Drive ya Microsoft OneDrive connect nahi kiya hai. Is wajah se <strong>evidence me khali alert message aayega, image (photo) save nahi hogi</strong>.
+              </p>
+              <p className="text-[11px] text-slate-400">
+                Security incidents ke time automatic visual evidence photos capture aur archive karne ke liye apna Google Drive ya OneDrive connect karein.
+              </p>
+            </div>
+
+            <div className="pt-2 flex flex-col sm:flex-row items-center justify-end gap-3">
+              <button
+                onClick={() => {
+                  sessionStorage.setItem('dismissedCloudDriveNotice', 'true');
+                  setCloudWarningModalOpen(false);
+                }}
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-semibold border border-white/10 transition-colors cursor-pointer text-center"
+              >
+                Continue with Text-Only Alerts
+              </button>
+
+              <button
+                onClick={() => {
+                  sessionStorage.setItem('dismissedCloudDriveNotice', 'true');
+                  setCloudWarningModalOpen(false);
+                  setActiveTab('integrations');
+                }}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white text-xs font-bold shadow-lg shadow-orange-500/20 transition-all cursor-pointer"
+              >
+                <Cloud className="w-4 h-4" />
+                <span>Connect Cloud Drive Now</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

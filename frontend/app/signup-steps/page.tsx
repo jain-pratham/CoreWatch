@@ -35,8 +35,11 @@ import {
   Building,
   CheckCircle,
   ExternalLink,
-  QrCode
+  QrCode,
+  Cloud,
+  FolderOpen
 } from "lucide-react";
+import CoreWatchLogo from '../../components/common/CoreWatchLogo';
 
 const AVAILABLE_AI_FEATURES = [
   { key: "intrusion_detection", label: "Intrusion Detection", desc: "Real-time human intrusion alerts in restricted security zones" },
@@ -253,9 +256,45 @@ export default function SignupStepsPage() {
     }
   }, [router, API_URL]);
 
-  // Handle countdown redirection for Step 5
+  const [connectingDrive, setConnectingDrive] = useState<string | null>(null);
+
+  const handleConnectDriveOAuth = async (provider: 'google_drive' | 'onedrive') => {
+    try {
+      setConnectingDrive(provider);
+      setErrorMessage(null);
+      const endpoint = provider === 'google_drive' 
+        ? `${API_URL}/api/integrations/google-drive/auth-url` 
+        : `${API_URL}/api/integrations/onedrive/auth-url`;
+
+      const res = await fetch(endpoint, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'x-user-email': user?.email || formData.email,
+        },
+      });
+
+      const data = await res.json();
+      if (data.success && data.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error(data.message || `Failed to initiate ${provider === 'google_drive' ? 'Google Drive' : 'OneDrive'} OAuth`);
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Error connecting cloud drive.');
+      setConnectingDrive(null);
+    }
+  };
+
+  const handleSkipCloudDrive = () => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('skipCloudStorage', 'true');
+    }
+    setStep(6);
+  };
+
+  // Handle countdown redirection for Step 6 (Final Complete)
   useEffect(() => {
-    if (step === 5) {
+    if (step === 6) {
       const timer = setInterval(() => {
         setCountdown((prev) => Math.max(0, prev - 1));
       }, 1000);
@@ -264,7 +303,7 @@ export default function SignupStepsPage() {
   }, [step]);
 
   useEffect(() => {
-    if (step === 5 && countdown === 0) {
+    if (step === 6 && countdown === 0) {
       router.push('/dashboard');
     }
   }, [countdown, step, router]);
@@ -729,7 +768,8 @@ export default function SignupStepsPage() {
     { num: 2, label: 'Business Address' },
     { num: 3, label: 'Choose Plan' },
     { num: 4, label: isFreePlan ? 'Camera Setup' : 'Payment' },
-    { num: 5, label: 'Complete' },
+    { num: 5, label: 'Cloud Storage' },
+    { num: 6, label: 'Complete' },
   ];
 
   return (
@@ -745,13 +785,13 @@ export default function SignupStepsPage() {
       <div className="w-full max-w-4xl px-4 z-10 relative flex flex-col items-center justify-center my-auto">
         {/* Centered Logo */}
         <div className="flex flex-col items-center gap-1 mb-3">
-          <img src="/logo.png" alt="CoreWatch" className="h-10 w-auto object-contain" />
+          <CoreWatchLogo className="h-10 w-auto" />
         </div>
 
         {/* Title & Subtitle */}
         <div className="text-center mb-3">
           <h1 className="text-2xl md:text-3xl font-extrabold text-foreground tracking-tight">Create Account</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Step {step} of 5</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Step {step} of 6</p>
         </div>
 
         {/* Stepper Horizontal Progress Bar */}
@@ -760,7 +800,7 @@ export default function SignupStepsPage() {
           <div className="absolute left-6 right-6 top-4.5 h-0.5 bg-border -z-10"></div>
           <div 
             className="absolute left-6 top-4.5 h-0.5 bg-primary -z-10 transition-all duration-300"
-            style={{ width: `${((step - 1) / 4) * 100}%` }}
+            style={{ width: `${((step - 1) / 5) * 100}%` }}
           ></div>
 
           {stepsList.map((s) => {
@@ -1738,8 +1778,130 @@ export default function SignupStepsPage() {
             </div>
           )}
 
-          {/* STEP 5: Success & Redirect countdown */}
+          {/* STEP 5: Cloud Storage Setup (with Skip option) */}
           {step === 5 && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between border-b border-border pb-3">
+                <div>
+                  <h2 className="text-sm md:text-base font-bold text-foreground flex items-center gap-2">
+                    <span className="w-1.5 h-3.5 bg-primary rounded-full"></span>
+                    5. Connect Cloud Storage (Evidence Archiving)
+                  </h2>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Choose where visual CCTV snapshots & alarm evidence will be stored.
+                  </p>
+                </div>
+                <span className="text-[10px] uppercase font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                  Optional Step
+                </span>
+              </div>
+
+              {/* Notice Banner */}
+              <div className="p-3 rounded-xl border border-amber-500/30 bg-amber-500/5 text-amber-300 text-xs flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                <div className="space-y-0.5">
+                  <p className="font-bold">Visual Evidence Archiving Notice</p>
+                  <p className="text-[11px] text-amber-200/80 leading-relaxed">
+                    Camera security alarms trigger real-time alert messages. To automatically save and archive photo screenshots of each violation, connect Google Drive or Microsoft OneDrive. 
+                    <strong className="text-amber-200"> If you skip this step, alerts will arrive with text messages only, and no image evidence will be saved.</strong>
+                  </p>
+                </div>
+              </div>
+
+              {/* Two Cloud Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
+                
+                {/* Google Drive Card */}
+                <div className="rounded-xl border border-border bg-card/60 p-4 space-y-3 flex flex-col justify-between hover:border-primary/50 transition-colors">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-lg bg-background border border-border p-1.5 flex items-center justify-center">
+                        <svg viewBox="0 0 87.3 78" className="w-full h-full">
+                          <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.9 2.5 3.2 3.3l12.3-21.3-16.15.05c-1.4 0-2.8-.7-3.2-2.1v13.4z" fill="#0066da"/>
+                          <path d="m43.65 25-12.3-21.3c-1.3.8-2.4 1.9-3.2 3.3l-27.15 47c-.8 1.4-.9 2.9-.2 4.3l16.15-.05 26.7-46.65z" fill="#00ac47"/>
+                          <path d="m73.55 76.8c1.3-.8 2.4-1.9 3.2-3.3l1.6-2.75 3.9-6.75c.8-1.4.7-2.9 0-4.3l-26.6-46.1h-24l26.7 46.65 15.2 16.55z" fill="#ea4335"/>
+                          <path d="m43.65 25 12.3-21.3c-1.3-.8-2.8-1.2-4.3-1.2h-16c-1.5 0-3 .4-4.3 1.2l12.3 21.3z" fill="#00832d"/>
+                          <path d="m59.35 52.4h-31.4l-12.3 21.3c1.3.8 2.8 1.2 4.3 1.2h47.4c1.5 0 3-.4 4.3-1.2l-12.3-21.3z" fill="#2684fc"/>
+                          <path d="m73.55 76.8-14.2-24.4h-31.4l12.3 21.3c1.3.8 2.8 1.2 4.3 1.2h29z" fill="#ffba00"/>
+                        </svg>
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-foreground">Google Drive</h4>
+                        <p className="text-[10px] text-muted-foreground">Google Workspace Storage</p>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      Structured subfolders: <code className="text-primary font-mono text-[9px]">CoreWatch Evidence / Category / CameraKey</code>
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleConnectDriveOAuth('google_drive')}
+                    disabled={connectingDrive !== null}
+                    className="w-full py-2 rounded-lg bg-primary hover:bg-brand-gold-light text-[#FAF6EE] text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-sm"
+                  >
+                    <Cloud className="w-3.5 h-3.5" />
+                    <span>{connectingDrive === 'google_drive' ? 'Connecting...' : 'Connect Google Drive'}</span>
+                  </button>
+                </div>
+
+                {/* Microsoft OneDrive Card */}
+                <div className="rounded-xl border border-border bg-card/60 p-4 space-y-3 flex flex-col justify-between hover:border-cyan-500/50 transition-colors">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-lg bg-background border border-border p-1.5 flex items-center justify-center">
+                        <svg viewBox="0 0 24 24" className="w-full h-full" fill="none">
+                          <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z" fill="#0078D4"/>
+                        </svg>
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-foreground">Microsoft OneDrive</h4>
+                        <p className="text-[10px] text-muted-foreground">Microsoft 365 Storage</p>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      Structured subfolders: <code className="text-cyan-400 font-mono text-[9px]">CoreWatch Evidence / Category / CameraKey</code>
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleConnectDriveOAuth('onedrive')}
+                    disabled={connectingDrive !== null}
+                    className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-sm"
+                  >
+                    <Cloud className="w-3.5 h-3.5" />
+                    <span>{connectingDrive === 'onedrive' ? 'Connecting...' : 'Connect Microsoft OneDrive'}</span>
+                  </button>
+                </div>
+
+              </div>
+
+              {/* Bottom Action Row for Step 5 */}
+              <div className="pt-3 border-t border-border flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={handleSkipCloudDrive}
+                  className="px-4 py-2 rounded-lg border border-border bg-card hover:bg-muted text-muted-foreground hover:text-foreground text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                >
+                  Skip for Now (Text-Only Alerts)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setStep(6)}
+                  className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer shadow-md flex items-center gap-1.5"
+                >
+                  <span>Go to Dashboard</span>
+                  <ArrowRight className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 6: Success & Redirect countdown */}
+          {step === 6 && (
             <div className="py-2 text-center space-y-3">
               <div className="w-12 h-12 rounded-full bg-emerald-500/15 border border-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto text-xl font-bold shadow-lg shadow-emerald-500/10 animate-bounce">
                 ✓

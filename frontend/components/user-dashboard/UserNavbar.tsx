@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import CoreWatchLogo from '../common/CoreWatchLogo';
 import { 
   LayoutDashboard, 
   Video, 
@@ -29,12 +30,17 @@ export interface UserNavbarProps {
     name?: string;
     email?: string;
     role?: string;
+    avatar?: string;
+    [key: string]: any;
   } | null;
   customer?: {
     plan?: string;
     company?: string;
     status?: string;
     cameras?: number;
+    avatar?: string;
+    user?: any;
+    [key: string]: any;
   } | null;
   onLogout: () => void;
   activeCameraKey?: string;
@@ -73,6 +79,38 @@ export default function UserNavbar({
 
   // Real plan state with localStorage and API fetch fallback
   const [localPlan, setLocalPlan] = useState<string | null>(customer?.plan || null);
+  const [navAvatar, setNavAvatar] = useState<string>(() => {
+    return user?.avatar || customer?.avatar || customer?.user?.avatar || '';
+  });
+
+  useEffect(() => {
+    const av = user?.avatar || customer?.avatar || customer?.user?.avatar;
+    if (av) {
+      setNavAvatar(av);
+    } else if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('user');
+        if (stored) {
+          const u = JSON.parse(stored);
+          if (u.avatar) setNavAvatar(u.avatar);
+        }
+      } catch {}
+    }
+  }, [user, customer]);
+
+  useEffect(() => {
+    const handleUserUpdate = () => {
+      try {
+        const stored = localStorage.getItem('user');
+        if (stored) {
+          const u = JSON.parse(stored);
+          if (u.avatar !== undefined) setNavAvatar(u.avatar);
+        }
+      } catch {}
+    };
+    window.addEventListener('user-updated', handleUserUpdate);
+    return () => window.removeEventListener('user-updated', handleUserUpdate);
+  }, []);
 
   useEffect(() => {
     if (customer?.plan) {
@@ -145,11 +183,7 @@ export default function UserNavbar({
               onClick={() => onSelectTab('dashboard')}
               className="flex items-center gap-2.5 text-left group cursor-pointer focus:outline-none select-none"
             >
-              <img 
-                src="/logo.png" 
-                alt="CoreWatch Logo" 
-                className="h-10 w-auto object-contain transition-transform duration-200 group-hover:scale-105 drop-shadow-[0_2px_8px_rgba(59,130,246,0.3)]" 
-              />
+              <CoreWatchLogo className="h-10 w-auto" />
               <span className="text-xl font-black tracking-tight text-white group-hover:text-orange-400 transition-colors">
                 CoreWatch
               </span>
@@ -361,14 +395,17 @@ export default function UserNavbar({
                 className="flex items-center gap-2.5 p-1 pr-2.5 rounded-full hover:bg-white/5 border border-transparent hover:border-[#2a3052] transition-all cursor-pointer focus:outline-none"
               >
                 <div className="relative">
-                  <img
-                    src="/uploads/avatar_asha.jpg"
-                    alt={displayName}
-                    className="w-8 h-8 rounded-full object-cover ring-2 ring-orange-500/30"
-                    onError={(e) => {
-                      (e.target as HTMLElement).style.display = 'none';
-                    }}
-                  />
+                  {navAvatar ? (
+                    <img
+                      src={navAvatar}
+                      alt={displayName}
+                      className="w-8 h-8 rounded-full object-cover ring-2 ring-orange-500/40"
+                    />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-500 to-amber-600 text-white font-black text-xs flex items-center justify-center ring-2 ring-orange-500/40 shadow-sm">
+                      {displayName.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase()}
+                    </div>
+                  )}
                   <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-[#16192b]" />
                 </div>
                 <div className="hidden sm:flex flex-col text-left">
@@ -387,10 +424,25 @@ export default function UserNavbar({
                 <div className="absolute right-0 mt-2 w-72 rounded-2xl bg-[#181b2e] border border-[#2b304c] shadow-2xl py-3 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
                   
                   {/* Header info */}
-                  <div className="px-5 pb-3 border-b border-[#252942] space-y-1.5">
-                    <p className="text-sm font-bold text-white tracking-tight">{displayName}</p>
-                    <p className="text-xs text-slate-400 font-mono truncate">{user?.email || 'user@corewatch.ai'}</p>
-                    <div className="pt-1 flex items-center gap-2">
+                  <div className="px-5 pb-3 border-b border-[#252942] space-y-2">
+                    <div className="flex items-center gap-3">
+                      {navAvatar ? (
+                        <img
+                          src={navAvatar}
+                          alt={displayName}
+                          className="w-10 h-10 rounded-full object-cover ring-2 ring-orange-500/40 shrink-0"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-500 to-amber-600 text-white font-black text-sm flex items-center justify-center ring-2 ring-orange-500/40 shrink-0">
+                          {displayName.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase()}
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold text-white tracking-tight truncate">{displayName}</p>
+                        <p className="text-xs text-slate-400 font-mono truncate">{user?.email || 'user@corewatch.ai'}</p>
+                      </div>
+                    </div>
+                    <div className="pt-0.5 flex items-center gap-2">
                       <span className="inline-block px-3 py-1 rounded-full text-[11px] font-bold bg-[#382618] text-[#f97316] border border-[#59381c]">
                         {subscriptionType}
                       </span>

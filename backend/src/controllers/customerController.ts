@@ -5,6 +5,7 @@ import User from "../models/User";
 import Customer from "../models/Customer";
 import Plan from "../models/Plan";
 import { AuthenticatedRequest } from "../middleware/authMiddleware";
+import { CloudStorageHelper } from "../services/cloudStorageHelper";
 
 // Helper to send professional update password/welcome email
 const sendWelcomeEmail = async (email: string, name: string, token: string): Promise<boolean> => {
@@ -376,7 +377,7 @@ export const setPassword = async (req: Request, res: Response): Promise<void> =>
 export const getCustomerMe = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user._id;
-    const customer = await Customer.findOne({ user: userId }).populate("user", "name email role");
+    const customer = await Customer.findOne({ user: userId }).populate("user", "name email role avatar");
 
     // Automatically sync customer.cameras with the plan quota saved by Super Admin in the Plan collection
     if (customer && customer.plan) {
@@ -410,6 +411,7 @@ export const updateCustomerMe = async (req: AuthenticatedRequest, res: Response)
     const userId = req.user._id;
     const {
       name,
+      avatar,
       phone,
       company,
       addressLine1,
@@ -423,15 +425,19 @@ export const updateCustomerMe = async (req: AuthenticatedRequest, res: Response)
       status,
     } = req.body;
 
-    // Update user's name if sent
-    if (name) {
-      await User.findByIdAndUpdate(userId, { name });
+    // Update user's name and/or avatar if provided
+    const userUpdate: any = {};
+    if (name) userUpdate.name = name;
+    if (avatar !== undefined) userUpdate.avatar = avatar;
+    if (Object.keys(userUpdate).length > 0) {
+      await User.findByIdAndUpdate(userId, userUpdate);
     }
 
     // Find or create Customer profile
     let customer = await Customer.findOne({ user: userId });
     
     const updateData: any = {};
+    if (avatar !== undefined) updateData.avatar = avatar;
     if (phone !== undefined) updateData.phone = phone;
     if (company !== undefined) updateData.company = company;
     if (addressLine1 !== undefined) updateData.addressLine1 = addressLine1;
@@ -456,6 +462,24 @@ export const updateCustomerMe = async (req: AuthenticatedRequest, res: Response)
         updateData,
         { new: true }
       );
+    }
+
+    // Background sync avatar to user's connected Cloud Storage (Google Drive or OneDrive)
+    if (avatar && typeof avatar === "string" && avatar.startsWith("data:image")) {
+      try {
+        const base64Data = avatar.replace(/^data:image\/\w+;base64,/, "");
+        const buffer = Buffer.from(base64Data, "base64");
+        CloudStorageHelper.uploadAlertEvidence({
+          userId: userId.toString(),
+          category: "Profile",
+          cameraKey: "User-Avatar",
+          filename: `profile_photo_${Date.now()}.jpg`,
+          buffer,
+          mimeType: "image/jpeg",
+        }).catch((err) => console.warn("Cloud sync for avatar failed:", err));
+      } catch (syncErr) {
+        console.warn("Avatar buffer conversion error:", syncErr);
+      }
     }
 
     res.status(200).json({

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import CoreWatchLogo from '../components/common/CoreWatchLogo';
 
 // Interfaces for Capability and Industry data structures
 interface Capability {
@@ -695,11 +696,7 @@ export default function CoreWatchLandingPage() {
           {/* Logo Branding */}
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => scrollToSection('hero')}>
             <div className="relative">
-              <img 
-                src="/logo.png" 
-                alt="CoreWatch Logo" 
-                className="h-16 w-auto object-contain"
-              />
+              <CoreWatchLogo className="h-16 w-auto" />
               {/* Pulse Indicator */}
               <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 z-10">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-gold/75 opacity-75"></span>
@@ -1672,11 +1669,7 @@ export default function CoreWatchLandingPage() {
           
           <div className="space-y-4">
             <div className="flex items-center gap-2">
-              <img 
-                src="/logo.png" 
-                alt="CoreWatch Logo" 
-                className="h-12 w-auto object-contain"
-              />
+              <CoreWatchLogo className="h-12 w-auto" />
               <span className="text-lg font-black text-white">CoreWatch</span>
             </div>
             <p className="text-xs text-zinc-400 leading-relaxed">

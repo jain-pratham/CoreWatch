@@ -184,4 +184,111 @@ body {
   scrollbar-width: none;  /* Firefox */
 }
 
+/* ========================================================================= */
+/* CoreWatch Animated Logo - Ultra Smooth Continuous Eye Open & Close        */
+/* ========================================================================= */
+@keyframes corewatchUpperEyelid {
+  0%, 25% {
+    transform: translateY(-105%);
+  }
+  48% {
+    transform: translateY(0%);
+  }
+  53% {
+    transform: translateY(0%);
+  }
+  76%, 100% {
+    transform: translateY(-105%);
+  }
+}
 
+@keyframes corewatchLowerEyelid {
+  0%, 25% {
+    transform: translateY(105%);
+  }
+  48% {
+    transform: translateY(0%);
+  }
+  53% {
+    transform: translateY(0%);
+  }
+  76%, 100% {
+    transform: translateY(105%);
+  }
+}
+
+@keyframes corewatchEyeBall {
+  0%, 25% {
+    transform: scaleY(1);
+    filter: brightness(1);
+  }
+  48%, 53% {
+    transform: scaleY(0.04);
+    filter: brightness(0.65);
+  }
+  76%, 100% {
+    transform: scaleY(1);
+    filter: brightness(1);
+  }
+}
+
+@keyframes corewatchSeamGlow {
+  0%, 44% {
+    opacity: 0;
+    transform: translateY(-50%) scaleX(0.7);
+  }
+  48%, 53% {
+    opacity: 1;
+    transform: translateY(-50%) scaleX(1);
+  }
+  57%, 100% {
+    opacity: 0;
+    transform: translateY(-50%) scaleX(0.7);
+  }
+}
+
+@keyframes corewatchLensScan {
+  0% {
+    opacity: 0;
+    transform: translateX(-140%) skewX(-20deg);
+  }
+  10% {
+    opacity: 0.8;
+  }
+  24% {
+    opacity: 0.8;
+  }
+  32% {
+    opacity: 0;
+    transform: translateX(140%) skewX(-20deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(140%) skewX(-20deg);
+  }
+}
+
+.animate-corewatch-upper-eyelid {
+  animation: corewatchUpperEyelid 3.6s cubic-bezier(0.45, 0.05, 0.25, 1) infinite;
+  will-change: transform;
+}
+
+.animate-corewatch-lower-eyelid {
+  animation: corewatchLowerEyelid 3.6s cubic-bezier(0.45, 0.05, 0.25, 1) infinite;
+  will-change: transform;
+}
+
+.animate-corewatch-eyeball,
+.animate-corewatch-eye-blink {
+  animation: corewatchEyeBall 3.6s cubic-bezier(0.45, 0.05, 0.25, 1) infinite;
+  will-change: transform;
+}
+
+.animate-corewatch-seam-glow,
+.animate-corewatch-eyelid-slit {
+  animation: corewatchSeamGlow 3.6s cubic-bezier(0.45, 0.05, 0.25, 1) infinite;
+}
+
+.animate-corewatch-lens-scan {
+  animation: corewatchLensScan 3.6s cubic-bezier(0.45, 0.05, 0.25, 1) infinite;
+}

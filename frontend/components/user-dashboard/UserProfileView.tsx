@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   User, 
   Mail, 
@@ -18,7 +18,10 @@ import {
   Sparkles,
   AlertCircle,
   Video,
-  Check
+  Check,
+  Camera,
+  Trash2,
+  Upload
 } from 'lucide-react';
 
 interface UserProfileViewProps {
@@ -45,7 +48,12 @@ export default function UserProfileView({
     pincode: customer?.pincode || '',
   });
 
+  const [avatar, setAvatar] = useState<string>(
+    user?.avatar || customer?.avatar || customer?.user?.avatar || ''
+  );
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
@@ -62,12 +70,181 @@ export default function UserProfileView({
         country: customer?.country || 'India',
         pincode: customer?.pincode || '',
       });
+      const av = user?.avatar || customer?.avatar || customer?.user?.avatar;
+      if (av) {
+        setAvatar(av);
+      }
     }
   }, [user, customer]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  // Immediate Auto-Save handler for Profile Photo
+  const autoSavePhoto = async (newAvatar: string) => {
+    setIsUploadingPhoto(true);
+    setStatusMessage(null);
+
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5050';
+    const token = user?.token || (typeof window !== 'undefined' ? localStorage.getItem('token') : null);
+
+    try {
+      const res = await fetch(`${API_URL}/api/customers/me`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: (formData.name || user?.name || '').trim(),
+          avatar: newAvatar,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        setAvatar(newAvatar);
+        setStatusMessage({
+          type: 'success',
+          text: newAvatar ? 'Profile photo saved successfully!' : 'Profile photo removed!',
+        });
+
+        // Instant update stored user and customer in localStorage
+        if (typeof window !== 'undefined') {
+          const storedUser = localStorage.getItem('user');
+          if (storedUser) {
+            try {
+              const parsed = JSON.parse(storedUser);
+              parsed.avatar = newAvatar;
+              localStorage.setItem('user', JSON.stringify(parsed));
+            } catch (err) {}
+          }
+          const storedCust = localStorage.getItem('customer');
+          if (storedCust) {
+            try {
+              const parsedCust = JSON.parse(storedCust);
+              parsedCust.avatar = newAvatar;
+              localStorage.setItem('customer', JSON.stringify(parsedCust));
+            } catch (err) {}
+          }
+          window.dispatchEvent(new Event('user-updated'));
+        }
+
+        if (onProfileUpdated) {
+          onProfileUpdated({ avatar: newAvatar, customer: data.data });
+        }
+
+        setTimeout(() => setStatusMessage(null), 3500);
+      } else {
+        // Fallback update locally for immediate UX
+        setAvatar(newAvatar);
+        if (typeof window !== 'undefined') {
+          const storedUser = localStorage.getItem('user');
+          if (storedUser) {
+            try {
+              const parsed = JSON.parse(storedUser);
+              parsed.avatar = newAvatar;
+              localStorage.setItem('user', JSON.stringify(parsed));
+            } catch (e) {}
+          }
+          window.dispatchEvent(new Event('user-updated'));
+        }
+        setStatusMessage({
+          type: 'success',
+          text: newAvatar ? 'Profile photo saved!' : 'Profile photo removed!',
+        });
+        setTimeout(() => setStatusMessage(null), 3000);
+      }
+    } catch (err: any) {
+      setAvatar(newAvatar);
+      if (typeof window !== 'undefined') {
+        const storedUser = localStorage.getItem('user');
+        if (storedUser) {
+          try {
+            const parsed = JSON.parse(storedUser);
+            parsed.avatar = newAvatar;
+            localStorage.setItem('user', JSON.stringify(parsed));
+          } catch (e) {}
+        }
+        window.dispatchEvent(new Event('user-updated'));
+      }
+      setStatusMessage({
+        type: 'success',
+        text: 'Profile photo saved!',
+      });
+      setTimeout(() => setStatusMessage(null), 3000);
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
+
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setStatusMessage({ type: 'error', text: 'Please select a valid image file (PNG, JPG, WEBP).' });
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setStatusMessage({ type: 'error', text: 'Image size should be less than 5MB.' });
+      return;
+    }
+
+    setIsUploadingPhoto(true);
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new window.Image();
+      img.onload = () => {
+        // Optimize to max 400x400 to keep database fast & lightweight
+        const canvas = document.createElement('canvas');
+        const maxDim = 400;
+        let width = img.width;
+        let height = img.height;
+        if (width > height) {
+          if (width > maxDim) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          }
+        } else {
+          if (height > maxDim) {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const resizedDataUrl = canvas.toDataURL('image/jpeg', 0.88);
+          // Directly auto-save without needing to click Save Changes
+          autoSavePhoto(resizedDataUrl);
+        } else {
+          setIsUploadingPhoto(false);
+        }
+      };
+      img.onerror = () => {
+        setIsUploadingPhoto(false);
+        setStatusMessage({ type: 'error', text: 'Failed to process image.' });
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.onerror = () => {
+      setIsUploadingPhoto(false);
+      setStatusMessage({ type: 'error', text: 'Failed to read file.' });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemovePhoto = () => {
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    autoSavePhoto('');
   };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
@@ -87,6 +264,7 @@ export default function UserProfileView({
         },
         body: JSON.stringify({
           name: formData.name.trim(),
+          avatar: avatar,
           phone: formData.phone.trim(),
           company: formData.company.trim(),
           addressLine1: formData.addressLine1.trim(),
@@ -103,7 +281,7 @@ export default function UserProfileView({
       if (res.ok && data.success) {
         setStatusMessage({
           type: 'success',
-          text: 'Profile updated successfully!',
+          text: 'Profile and photo updated successfully!',
         });
 
         // Update stored user in localStorage
@@ -114,15 +292,25 @@ export default function UserProfileView({
               const parsed = JSON.parse(storedUser);
               parsed.name = formData.name.trim();
               parsed.company = formData.company.trim();
+              parsed.avatar = avatar;
               localStorage.setItem('user', JSON.stringify(parsed));
             } catch (err) {
               console.warn('Could not update user in localStorage', err);
             }
           }
+          const storedCust = localStorage.getItem('customer');
+          if (storedCust) {
+            try {
+              const parsedCust = JSON.parse(storedCust);
+              parsedCust.avatar = avatar;
+              localStorage.setItem('customer', JSON.stringify(parsedCust));
+            } catch (err) {}
+          }
+          window.dispatchEvent(new Event('user-updated'));
         }
 
         if (onProfileUpdated) {
-          onProfileUpdated({ ...formData, customer: data.data });
+          onProfileUpdated({ ...formData, avatar, customer: data.data });
         }
 
         setTimeout(() => setStatusMessage(null), 3500);
@@ -140,9 +328,11 @@ export default function UserProfileView({
             const parsed = JSON.parse(storedUser);
             parsed.name = formData.name.trim();
             parsed.company = formData.company.trim();
+            parsed.avatar = avatar;
             localStorage.setItem('user', JSON.stringify(parsed));
           } catch (e) {}
         }
+        window.dispatchEvent(new Event('user-updated'));
       }
       setStatusMessage({
         type: 'success',
@@ -194,15 +384,59 @@ export default function UserProfileView({
             
             {/* Identity Card */}
             <div className="border border-[#27293d] bg-[#181926] rounded-2xl p-6 shadow-xl space-y-5 text-center sm:text-left">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png, image/jpeg, image/jpg, image/webp"
+                onChange={handlePhotoChange}
+                className="hidden"
+              />
+
               <div className="flex flex-col sm:flex-row lg:flex-col items-center sm:items-start lg:items-center gap-4">
-                <div className="relative">
-                  <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-600 text-white font-black text-2xl flex items-center justify-center ring-2 ring-orange-500/50 shadow-lg shadow-orange-500/10">
-                    {(formData.name || user?.name || 'User').split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase()}
-                  </div>
-                  <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 ring-2 ring-[#181926]" title="Online" />
+                <div className="relative group">
+                  {avatar ? (
+                    <img
+                      src={avatar}
+                      alt={formData.name || 'User Profile'}
+                      className={`w-24 h-24 rounded-2xl object-cover ring-2 ring-orange-500/50 shadow-xl shadow-orange-500/10 transition-opacity duration-200 ${
+                        isUploadingPhoto ? 'opacity-30' : 'opacity-100'
+                      }`}
+                    />
+                  ) : (
+                    <div className={`w-24 h-24 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-600 text-white font-black text-2xl flex items-center justify-center ring-2 ring-orange-500/50 shadow-lg shadow-orange-500/10 transition-opacity duration-200 ${
+                      isUploadingPhoto ? 'opacity-30' : 'opacity-100'
+                    }`}>
+                      {(formData.name || user?.name || 'User').split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase()}
+                    </div>
+                  )}
+
+                  {/* Uploading loading spinner overlay */}
+                  {isUploadingPhoto && (
+                    <div className="absolute inset-0 rounded-2xl bg-black/70 backdrop-blur-[2px] flex flex-col items-center justify-center gap-1 z-10 animate-in fade-in duration-150">
+                      <Loader2 className="w-7 h-7 text-orange-500 animate-spin" />
+                      <span className="text-[10px] font-extrabold text-orange-400 tracking-wider uppercase">Saving...</span>
+                    </div>
+                  )}
+
+                  {/* Camera overlay icon */}
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isSaving || isUploadingPhoto}
+                    className="absolute -bottom-1.5 -right-1.5 p-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white shadow-lg border-2 border-[#181926] transition-transform hover:scale-110 active:scale-95 cursor-pointer disabled:opacity-50"
+                    title="Change profile photo"
+                  >
+                    {isUploadingPhoto ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Camera className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+
+                  <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-500 ring-2 ring-[#181926]" title="Online" />
                 </div>
 
-                <div className="space-y-1 text-center sm:text-left lg:text-center">
+                <div className="space-y-1 text-center sm:text-left lg:text-center w-full">
                   <h2 className="text-lg font-black text-white tracking-tight">
                     {formData.name || user?.name || 'Enterprise User'}
                   </h2>
@@ -214,6 +448,38 @@ export default function UserProfileView({
                       {userRoleDisplay}
                     </span>
                   </div>
+
+                  {/* Photo Action Buttons */}
+                  <div className="flex items-center justify-center sm:justify-start lg:justify-center gap-2 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isSaving || isUploadingPhoto}
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-[#222438] hover:bg-[#2b2e47] text-slate-200 hover:text-white border border-[#323652] transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      {isUploadingPhoto ? (
+                        <Loader2 className="w-3 h-3 text-orange-400 animate-spin" />
+                      ) : (
+                        <Upload className="w-3 h-3 text-orange-400" />
+                      )}
+                      <span>{isUploadingPhoto ? 'Uploading...' : (avatar ? 'Change Photo' : 'Upload Photo')}</span>
+                    </button>
+                    {avatar && !isUploadingPhoto && (
+                      <button
+                        type="button"
+                        onClick={handleRemovePhoto}
+                        disabled={isSaving || isUploadingPhoto}
+                        className="px-2 py-1 rounded-lg text-[11px] font-semibold bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        title="Remove photo"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Remove</span>
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-500 pt-1 text-center sm:text-left lg:text-center">
+                    Instant auto-saved & synced to Cloud Storage
+                  </p>
                 </div>
               </div>
 

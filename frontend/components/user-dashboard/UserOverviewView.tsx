@@ -862,10 +862,10 @@ export default function UserOverviewView({
                 <Camera className="w-5 h-5 text-slate-400" />
               </div>
               <div className="text-xs font-bold text-slate-200">
-                No Security Snapshots Captured Yet
+                No Cloud Evidence Photos Archived
               </div>
               <p className="text-[11px] text-slate-400 max-w-sm mx-auto leading-relaxed">
-                When AI vision models trigger safety violations or perimeter breaches on your connected feeds, frame snapshots will be archived here automatically.
+                Connect Google Drive or Microsoft OneDrive in Cloud Storage settings to automatically capture and archive visual photo evidence for security alarms.
               </p>
             </div>
           )}

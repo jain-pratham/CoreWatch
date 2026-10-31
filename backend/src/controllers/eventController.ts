@@ -51,15 +51,14 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
     let snapshotUrl = "";
     let cloudResult: any = null;
     if (snapshotBase64) {
-      const uploadsDir = path.join(process.cwd(), "uploads");
-      snapshotUrl = saveBase64Image(snapshotBase64, uploadsDir);
-
       try {
         const matches = snapshotBase64.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
         const buffer = matches
           ? Buffer.from(matches[2], "base64")
           : Buffer.from(snapshotBase64, "base64");
 
+        // ONLY upload if an active cloud drive (Google Drive / OneDrive) is connected.
+        // No local images are saved to disk as per policy.
         cloudResult = await CloudStorageHelper.uploadAlertEvidence({
           userId: targetCustomerId.toString(),
           category: type || "Safety Violation",
@@ -68,8 +67,12 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
           buffer,
           mimeType: "image/jpeg",
         });
+
+        if (cloudResult && cloudResult.success && cloudResult.webViewLink) {
+          snapshotUrl = cloudResult.webViewLink;
+        }
       } catch (cloudErr) {
-        console.warn("Evidence cloud auto-upload note:", cloudErr);
+        console.warn("Evidence cloud upload skipped or unavailable:", cloudErr);
       }
     }
 
@@ -78,7 +81,7 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
       cameraId: req.body.cameraId || "CAM-DEFAULT",
       type: type || "Safety Violation",
       severity: severity || "medium",
-      snapshotUrl,
+      snapshotUrl, // Empty if no cloud drive connected!
       snapshotPath: snapshotUrl,
       cloudFileId: cloudResult?.fileId || null,
       cloudViewLink: cloudResult?.webViewLink || null,

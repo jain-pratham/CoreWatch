@@ -30,6 +30,10 @@ const UserSchema = new Schema(
       enum: ["admin", "user", "demo"],
       default: "user",
     },
+    avatar: {
+      type: String,
+      default: "",
+    },
     isVerified: {
       type: Boolean,
       default: false,

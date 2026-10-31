@@ -21,6 +21,7 @@ interface UserData {
   email: string;
   role: 'admin' | 'user' | 'demo';
   company?: string;
+  avatar?: string;
   token?: string;
 }
 
@@ -1146,6 +1147,8 @@ function DashboardContent() {
         <UserDashboardContainer
           user={user}
           customer={customer}
+          setUser={setUser}
+          setCustomer={setCustomer}
           cameras={cameras}
           setCameras={setCameras}
           dbAlerts={dbAlerts}
@@ -1364,9 +1367,13 @@ function DashboardContent() {
                 onClick={() => setShowProfileMenu(!showProfileMenu)}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-border hover:bg-muted transition-colors cursor-pointer"
               >
-                <div className="w-6 h-6 rounded-full bg-[#785D32] text-white font-black text-[10px] flex items-center justify-center">
-                  {avatarInitials}
-                </div>
+                {user?.avatar ? (
+                  <img src={user.avatar} alt={user?.name || 'User'} className="w-6 h-6 rounded-full object-cover" />
+                ) : (
+                  <div className="w-6 h-6 rounded-full bg-[#785D32] text-white font-black text-[10px] flex items-center justify-center">
+                    {avatarInitials}
+                  </div>
+                )}
                 <span className="text-xs font-bold text-foreground uppercase">{user?.role}</span>
                 <svg className="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />

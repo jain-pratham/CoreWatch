@@ -52,6 +52,10 @@ const CustomerSchema = new Schema(
       enum: ["Active", "Pending", "Suspended"],
       default: "Pending",
     },
+    avatar: {
+      type: String,
+      default: "",
+    },
     googleDriveSettings: {
       isEnabled: { type: Boolean, default: false },
       refreshToken: { type: String, default: null },
