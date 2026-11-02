@@ -4,6 +4,7 @@ import nodemailer from "nodemailer";
 import User from "../models/User";
 import Customer from "../models/Customer";
 import Plan from "../models/Plan";
+import Camera from "../models/Camera";
 import { AuthenticatedRequest } from "../middleware/authMiddleware";
 import { CloudStorageHelper } from "../services/cloudStorageHelper";
 
@@ -423,6 +424,7 @@ export const updateCustomerMe = async (req: AuthenticatedRequest, res: Response)
       plan,
       cameras,
       status,
+      systemSettings,
     } = req.body;
 
     // Update user's name and/or avatar if provided
@@ -449,6 +451,19 @@ export const updateCustomerMe = async (req: AuthenticatedRequest, res: Response)
     if (plan !== undefined) updateData.plan = plan;
     if (cameras !== undefined) updateData.cameras = Number(cameras);
     if (status !== undefined) updateData.status = status;
+    if (systemSettings !== undefined) {
+      updateData.systemSettings = systemSettings;
+      // Sync real detection toggles to user's cameras
+      const cameraUpdates: any = {};
+      if (typeof systemSettings.humanDetection === 'boolean') cameraUpdates.humanDetection = systemSettings.humanDetection;
+      if (typeof systemSettings.zoneMonitoring === 'boolean') cameraUpdates.zoneMonitoring = systemSettings.zoneMonitoring;
+      if (typeof systemSettings.afterHoursSecurity === 'boolean') cameraUpdates.afterHoursSecurity = systemSettings.afterHoursSecurity;
+      if (typeof systemSettings.suspiciousMovement === 'boolean') cameraUpdates.suspiciousMovement = systemSettings.suspiciousMovement;
+      if (typeof systemSettings.cameraHealth === 'boolean') cameraUpdates.cameraHealth = systemSettings.cameraHealth;
+      if (Object.keys(cameraUpdates).length > 0) {
+        await Camera.updateMany({ userId }, cameraUpdates);
+      }
+    }
 
     if (!customer) {
       customer = await Customer.create({

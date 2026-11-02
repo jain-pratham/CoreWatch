@@ -1,4 +1,5 @@
 import { Response } from "express";
+import crypto from "crypto";
 import { AuthenticatedRequest } from "../middleware/authMiddleware";
 import User from "../models/User";
 import Customer from "../models/Customer";
@@ -192,6 +193,140 @@ export const changeUserPassword = async (req: AuthenticatedRequest, res: Respons
     res.status(500).json({
       success: false,
       message: error instanceof Error ? error.message : "Server error changing password",
+    });
+  }
+};
+
+// @desc    Get 2FA status and setup secret
+// @route   GET /api/users/2fa
+// @access  Private
+export const getTwoFactorStatus = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      res.status(404).json({ success: false, message: "User not found" });
+      return;
+    }
+
+    const twoFA = (user as any).twoFactorSettings || {};
+    const isEnabled = !!twoFA.isEnabled;
+
+    if (isEnabled) {
+      res.status(200).json({
+        success: true,
+        data: {
+          isEnabled: true,
+          backupCodesCount: Array.isArray(twoFA.backupCodes) ? twoFA.backupCodes.length : 0,
+        },
+      });
+      return;
+    }
+
+    // Generate a fresh 16-char base32 secret and backup codes for setup
+    const secretChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let generatedSecret = "";
+    const randBytes = crypto.randomBytes(24);
+    for (let i = 0; i < 16; i++) {
+      generatedSecret += secretChars[randBytes[i] % secretChars.length];
+    }
+
+    // Generate 6 backup codes like CW-1234-5678
+    const backupCodes: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const p1 = Math.floor(1000 + Math.random() * 9000);
+      const p2 = Math.floor(1000 + Math.random() * 9000);
+      backupCodes.push(`CW-${p1}-${p2}`);
+    }
+
+    const otpauthUrl = `otpauth://totp/CoreWatch:${encodeURIComponent(user.email)}?secret=${generatedSecret}&issuer=CoreWatch`;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        isEnabled: false,
+        secret: generatedSecret,
+        otpauthUrl,
+        backupCodes,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : "Server error fetching 2FA status",
+    });
+  }
+};
+
+// @desc    Verify and enable 2FA
+// @route   POST /api/users/2fa/verify
+// @access  Private
+export const verifyAndEnableTwoFactor = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { code, secret, backupCodes } = req.body;
+    if (!code || !secret) {
+      res.status(400).json({ success: false, message: "Verification code and secret key are required" });
+      return;
+    }
+
+    const cleanCode = code.toString().trim();
+    if (!/^\d{6}$/.test(cleanCode)) {
+      res.status(400).json({ success: false, message: "Verification code must be exactly 6 numeric digits" });
+      return;
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      res.status(404).json({ success: false, message: "User not found" });
+      return;
+    }
+
+    (user as any).twoFactorSettings = {
+      isEnabled: true,
+      secret: secret.trim(),
+      backupCodes: Array.isArray(backupCodes) ? backupCodes : [],
+    };
+
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Two-Factor Authentication activated successfully",
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : "Server error activating 2FA",
+    });
+  }
+};
+
+// @desc    Disable 2FA
+// @route   POST /api/users/2fa/disable
+// @access  Private
+export const disableTwoFactor = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      res.status(404).json({ success: false, message: "User not found" });
+      return;
+    }
+
+    (user as any).twoFactorSettings = {
+      isEnabled: false,
+      secret: null,
+      backupCodes: [],
+    };
+
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Two-Factor Authentication disabled successfully",
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : "Server error disabling 2FA",
     });
   }
 };

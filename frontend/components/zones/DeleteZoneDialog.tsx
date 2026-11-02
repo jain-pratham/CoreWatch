@@ -22,20 +22,20 @@ export default function DeleteZoneDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
       <div 
-        className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
+        className="fixed inset-0 bg-black/75 backdrop-blur-sm transition-opacity"
         onClick={onCancel}
       />
 
       {/* Modal Card */}
-      <div className="relative w-full max-w-md p-6 rounded-2xl border border-border bg-card shadow-2xl space-y-6 text-xs text-foreground z-10 animate-scaleIn">
+      <div className="relative w-full max-w-md p-6 rounded-2xl border border-[#27293d] bg-[#181926] shadow-2xl space-y-6 text-xs text-slate-100 z-10 animate-scaleIn">
         <div className="flex gap-4">
-          <div className="w-10 h-10 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-400 flex items-center justify-center shrink-0">
             <AlertTriangle className="w-5 h-5" />
           </div>
           <div className="space-y-1.5 flex-1 min-w-0">
-            <h3 className="text-sm font-bold text-foreground truncate">Delete Zone?</h3>
-            <p className="text-muted-foreground leading-normal">
-              Are you sure you want to delete the security zone <strong className="text-foreground">&ldquo;{zoneName}&rdquo;</strong>? This action cannot be undone and will stop AI alerting for this region.
+            <h3 className="text-sm font-bold text-white truncate">Delete Zone?</h3>
+            <p className="text-slate-400 leading-normal">
+              Are you sure you want to delete the security zone <strong className="text-white">&ldquo;{zoneName}&rdquo;</strong>? This action cannot be undone and will stop AI alerting for this region.
             </p>
           </div>
         </div>
@@ -44,14 +44,14 @@ export default function DeleteZoneDialog({
           <button
             onClick={onCancel}
             disabled={isDeleting}
-            className="px-4 py-2 rounded-xl border border-border hover:bg-muted font-bold text-foreground transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 rounded-xl border border-[#27293d] bg-[#141624] hover:bg-[#1f2238] font-bold text-slate-300 hover:text-white transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Cancel
           </button>
           <button
             onClick={onConfirm}
             disabled={isDeleting}
-            className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+            className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 shadow-lg shadow-rose-950/40"
           >
             {isDeleting ? (
               <>

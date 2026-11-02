@@ -42,15 +42,27 @@ export const verifyCameraAccess = async (user: any, cameraId: string) => {
   if (user.role === "admin") {
     isAuthorized = true;
   } else {
-    // 1. Direct ownership check (camera.userId matches req.user._id)
-    if (camera.userId && camera.userId.toString() === user._id.toString()) {
+    const userStr = user._id ? user._id.toString() : "";
+    const userLinkedStr = user.user ? user.user.toString() : "";
+    const camUserStr = camera.userId ? camera.userId.toString() : "";
+
+    // 1. Direct ownership check (camera.userId matches req.user._id or linked user)
+    if (camUserStr && (camUserStr === userStr || (userLinkedStr && camUserStr === userLinkedStr))) {
       isAuthorized = true;
     }
 
-    // 2. Indirect ownership check (camera.shopId -> Shop.ownerId matches req.user._id)
+    // 2. Customer cross-reference check
+    if (!isAuthorized && camUserStr) {
+      const customer = await Customer.findOne({ $or: [{ user: user._id }, { _id: user._id }] });
+      if (customer && (camUserStr === customer._id.toString() || (customer.user && camUserStr === customer.user.toString()))) {
+        isAuthorized = true;
+      }
+    }
+
+    // 3. Indirect ownership check (camera.shopId -> Shop.ownerId matches req.user._id)
     if (!isAuthorized && camera.shopId) {
       const shop = await Shop.findById(camera.shopId);
-      if (shop && shop.ownerId && shop.ownerId.toString() === user._id.toString()) {
+      if (shop && shop.ownerId && (shop.ownerId.toString() === userStr || (userLinkedStr && shop.ownerId.toString() === userLinkedStr))) {
         isAuthorized = true;
       }
     }
@@ -170,21 +182,61 @@ export const getZones = async (user: any, filters: any): Promise<IZone[]> => {
     const shops = await Shop.find({ ownerId: user._id });
     const shopIds = shops.map(s => s._id);
 
+    const candidateUserIds: any[] = [];
+    if (user._id) {
+      candidateUserIds.push(user._id);
+      candidateUserIds.push(user._id.toString());
+      if (mongoose.isValidObjectId(user._id)) {
+        candidateUserIds.push(new mongoose.Types.ObjectId(user._id.toString()));
+      }
+    }
+    if (user.user) {
+      candidateUserIds.push(user.user);
+      candidateUserIds.push(user.user.toString());
+      if (mongoose.isValidObjectId(user.user)) {
+        candidateUserIds.push(new mongoose.Types.ObjectId(user.user.toString()));
+      }
+    }
+
+    const customer = await Customer.findOne({ $or: [{ user: user._id }, { _id: user._id }] });
+    if (customer) {
+      candidateUserIds.push(customer._id);
+      candidateUserIds.push(customer._id.toString());
+      if (customer.user) {
+        candidateUserIds.push(customer.user);
+        candidateUserIds.push(customer.user.toString());
+      }
+    }
+
     const cameras = await Camera.find({
       $or: [
-        { userId: user._id },
+        { userId: { $in: candidateUserIds } },
         { shopId: { $in: shopIds } }
       ]
     });
 
     const authorizedCameraKeys = cameras.map(c => c.cameraKey);
-    query.cameraId = { $in: authorizedCameraKeys };
 
     if (filters.cameraId) {
+      if (!authorizedCameraKeys.includes(filters.cameraId)) {
+        const targetCam = await Camera.findOne({
+          cameraKey: filters.cameraId,
+          $or: [
+            { userId: { $in: candidateUserIds } },
+            { shopId: { $in: shopIds } }
+          ]
+        });
+        if (targetCam) {
+          authorizedCameraKeys.push(targetCam.cameraKey);
+        }
+      }
+
       if (!authorizedCameraKeys.includes(filters.cameraId)) {
         throw new ServiceError("Unauthorized access to this camera's zones", 403);
       }
       query.cameraId = filters.cameraId;
+    } else {
+      query.cameraId = { $in: authorizedCameraKeys };
     }
   } else {
     // Admin query

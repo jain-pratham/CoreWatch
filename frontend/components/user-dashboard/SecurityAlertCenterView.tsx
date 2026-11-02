@@ -22,7 +22,8 @@ import {
   VolumeX,
   Calendar,
   SlidersHorizontal,
-  ChevronLeft
+  ChevronLeft,
+  ExternalLink
 } from 'lucide-react';
 import { securityAudio } from '@/lib/securityAudio';
 
@@ -33,6 +34,18 @@ interface SecurityAlertCenterViewProps {
   onResolveAlert: (alertId: string, notes: string) => Promise<void>;
   onViewCamera: (cameraKey: string) => void;
   onRefreshAlerts?: () => void;
+}
+
+
+function getDisplayableImageUrl(url?: string, cloudFileId?: string): string {
+  if (!url && !cloudFileId) return '';
+  if (cloudFileId) {
+    return `/api/evidence-image?fileId=${cloudFileId}`;
+  }
+  if (url && (url.includes('lh3.googleusercontent.com') || url.includes('drive.google.com'))) {
+    return `/api/evidence-image?url=${encodeURIComponent(url)}`;
+  }
+  return url || '';
 }
 
 export default function SecurityAlertCenterView({
@@ -56,7 +69,7 @@ export default function SecurityAlertCenterView({
   const itemsPerPage = 15;
 
   // Modals state
-  const [previewSnapshot, setPreviewSnapshot] = useState<{ url: string; title: string; time: string; reason?: string } | null>(null);
+  const [previewSnapshot, setPreviewSnapshot] = useState<{ url: string; title: string; time: string; reason?: string; cloudViewLink?: string } | null>(null);
   const [resolveModalAlert, setResolveModalAlert] = useState<any | null>(null);
   const [resolveNotes, setResolveNotes] = useState<string>('');
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
@@ -465,11 +478,12 @@ export default function SecurityAlertCenterView({
                   <div className="flex items-start gap-3.5 flex-1 min-w-0">
                     
                     {/* Snapshot Thumbnail Preview */}
-                    {alert.imageUrl ? (
+                    {(alert.imageUrl || alert.cloudFileId) ? (
                       <button
                         type="button"
                         onClick={() => setPreviewSnapshot({
-                          url: alert.imageUrl,
+                          url: getDisplayableImageUrl(alert.imageUrl, alert.cloudFileId),
+                          cloudViewLink: alert.cloudViewLink || (alert.cloudFileId ? `https://drive.google.com/file/d/${alert.cloudFileId}/view?usp=sharing` : undefined),
                           title: alert.message,
                           reason: alert.reason || alert.description,
                           time: timeFormatted
@@ -478,8 +492,9 @@ export default function SecurityAlertCenterView({
                         title="Click to view evidence snapshot"
                       >
                         <img
-                          src={alert.imageUrl}
+                          src={getDisplayableImageUrl(alert.imageUrl, alert.cloudFileId)}
                           alt="Security snapshot"
+                          referrerPolicy="no-referrer"
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                         />
                         <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -774,10 +789,24 @@ export default function SecurityAlertCenterView({
               <img
                 src={previewSnapshot.url}
                 alt="Security incident snapshot"
+                referrerPolicy="no-referrer"
                 className="max-h-[65vh] w-auto object-contain rounded-lg shadow-lg border border-[#2b304c]"
               />
             </div>
-            <div className="p-3 bg-[#121422] border-t border-[#2b304c] flex justify-end">
+            <div className="p-3 bg-[#121422] border-t border-[#2b304c] flex items-center justify-between">
+              {previewSnapshot.cloudViewLink ? (
+                <a
+                  href={previewSnapshot.cloudViewLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3.5 py-1.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 font-bold text-xs flex items-center gap-1.5 transition-all"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Open in Google Drive</span>
+                </a>
+              ) : (
+                <div />
+              )}
               <button
                 type="button"
                 onClick={() => setPreviewSnapshot(null)}

@@ -1,6 +1,7 @@
 import cv2
 import json
 import time
+import base64
 import requests
 import threading
 from datetime import datetime
@@ -59,33 +60,37 @@ class AlertDispatcher:
 
     def _dispatch_worker(self, frame, camera_key: str, message: str, category: str = "HUMAN_DETECTION", event_type: str = "", reason: str = "", zone_name: str = ""):
         """
-        Saves snapshot, uploads to ImgBB, and posts threat metadata to the backend API.
+        Saves snapshot, encodes base64 for direct Google Drive sync, and posts threat metadata to backend.
         """
         if frame is None:
-            # Skip image upload and dispatch metadata alert directly
             logger.info(f"[Alert] No frame provided. Dispatching text alert for camera {camera_key}...")
-            self._send_payload(camera_key, "", message, category, event_type, reason, zone_name)
+            self._send_payload(camera_key, "", message, category, event_type, reason, zone_name, None)
             return
 
         temp_filename = f"detection_{camera_key}.jpg"
+        snapshot_b64 = None
+        image_url = None
         
         try:
-            # Save frame as local image file
-            success = cv2.imwrite(temp_filename, frame)
-            if not success:
-                logger.error(f"[Alert] Failed to write temporary snapshot to disk for camera {camera_key}.")
-                return
+            # 1. Encode frame directly as JPEG base64 so backend can upload straight to Google Drive
+            ret, buf = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            if ret:
+                snapshot_b64 = "data:image/jpeg;base64," + base64.b64encode(buf).decode('utf-8')
 
-            # Upload image to ImgBB
-            image_url = upload_to_imgbb(temp_filename)
+            # 2. Also write temporary snapshot file and upload to ImgBB as secondary mirror
+            try:
+                cv2.imwrite(temp_filename, frame)
+                image_url = upload_to_imgbb(temp_filename)
+            except Exception as imgbb_err:
+                logger.warn(f"[Alert] Secondary ImgBB mirror skipped: {imgbb_err}")
 
-            # Send payload to Next.js server
-            self._send_payload(camera_key, image_url, message, category, event_type, reason, zone_name)
+            # 3. Send payload to Next.js server with both image_url and snapshotBase64
+            self._send_payload(camera_key, image_url, message, category, event_type, reason, zone_name, snapshot_b64)
             
         except Exception as e:
             logger.error(f"[Alert] Error during background alert dispatch: {e}")
 
-    def _send_payload(self, camera_key: str, image_url: str, message: str, category: str = "HUMAN_DETECTION", event_type: str = "", reason: str = "", zone_name: str = ""):
+    def _send_payload(self, camera_key: str, image_url: str, message: str, category: str = "HUMAN_DETECTION", event_type: str = "", reason: str = "", zone_name: str = "", snapshot_b64: str = None):
         """
         Helper method to perform HTTP POST to the Next.js API server.
         """
@@ -93,6 +98,7 @@ class AlertDispatcher:
             "cameraKey": camera_key,
             "timestamp": datetime.utcnow().isoformat() + "Z",  # ISO 8601 UTC string
             "imageUrl": image_url or "",
+            "snapshotBase64": snapshot_b64 or "",
             "message": message,
             "category": category,
             "eventType": event_type,
@@ -104,7 +110,7 @@ class AlertDispatcher:
             headers = {"Content-Type": "application/json"}
             logger.info(f"[Alert] Posting alert payload ({category}) to Next.js endpoint: {self.api_url}...")
             
-            response = requests.post(self.api_url, data=json.dumps(payload), headers=headers, timeout=5)
+            response = requests.post(self.api_url, data=json.dumps(payload), headers=headers, timeout=10)
             logger.info(f"[Alert] Server responded: HTTP {response.status_code} - {response.text}")
         except requests.exceptions.RequestException as e:
             logger.error(f"[Alert] Connection failed: Next.js server is unreachable. (Error: {e})")

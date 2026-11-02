@@ -57,6 +57,11 @@ const UserSchema = new Schema(
       rootFolderId: { type: String, default: null },
       userEmail: { type: String, default: null },
     },
+    twoFactorSettings: {
+      isEnabled: { type: Boolean, default: false },
+      secret: { type: String, default: null },
+      backupCodes: [{ type: String }],
+    },
   },
   {
     timestamps: true,

@@ -4,7 +4,7 @@ import dotenv from "dotenv";
 import http from "http";
 import path from "path";
 import { connectDB } from "./config/db";
-import { protect, isAdmin } from "./middleware/authMiddleware";
+import { protect, optionalProtect, isAdmin } from "./middleware/authMiddleware";
 import { initSocket } from "./config/socket";
 
 // Load environment variables
@@ -26,7 +26,17 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 // Import controllers
 import { registerUser, loginUser, getMe, updateUserRole, verifyEmail } from "./controllers/authController";
-import { getUsers, createUser, deleteUser, getUserProfile, updateUserProfile, changeUserPassword } from "./controllers/userController";
+import { 
+  getUsers, 
+  createUser, 
+  deleteUser, 
+  getUserProfile, 
+  updateUserProfile, 
+  changeUserPassword,
+  getTwoFactorStatus,
+  verifyAndEnableTwoFactor,
+  disableTwoFactor
+} from "./controllers/userController";
 import { getLeads, createLead, updateLead, deleteLead } from "./controllers/leadController";
 
 // Public Auth Routes
@@ -40,6 +50,9 @@ app.put("/api/auth/role", protect, updateUserRole);
 app.get("/api/users/profile", protect, getUserProfile);
 app.put("/api/users/profile", protect, updateUserProfile);
 app.put("/api/users/change-password", protect, changeUserPassword);
+app.get("/api/users/2fa", protect, getTwoFactorStatus);
+app.post("/api/users/2fa/verify", protect, verifyAndEnableTwoFactor);
+app.post("/api/users/2fa/disable", protect, disableTwoFactor);
 app.get("/api/users", protect, isAdmin, getUsers);
 app.post("/api/users", protect, isAdmin, createUser);
 app.delete("/api/users/:id", protect, isAdmin, deleteUser);
@@ -127,7 +140,7 @@ app.get("/api/integrations/onedrive/callback", handleOneDriveCallback);
 app.post("/api/integrations/onedrive/disconnect", protect, disconnectOneDrive);
 
 app.post("/api/integrations/upload", protect, uploadTemp.single("file"), uploadDocument);
-app.post("/api/integrations/test-upload", protect, testCloudEvidenceUpload);
+app.post("/api/integrations/test-upload", optionalProtect, testCloudEvidenceUpload);
 
 // Serve Static Uploads (for CCTV snapshots)
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));

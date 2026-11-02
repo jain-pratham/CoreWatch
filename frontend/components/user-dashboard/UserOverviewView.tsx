@@ -40,6 +40,18 @@ interface UserOverviewViewProps {
   onOpenInviteUser?: () => void;
 }
 
+
+function getDisplayableImageUrl(url?: string, cloudFileId?: string): string {
+  if (!url && !cloudFileId) return '';
+  if (cloudFileId) {
+    return `/api/evidence-image?fileId=${cloudFileId}`;
+  }
+  if (url && (url.includes('lh3.googleusercontent.com') || url.includes('drive.google.com'))) {
+    return `/api/evidence-image?url=${encodeURIComponent(url)}`;
+  }
+  return url || '';
+}
+
 export default function UserOverviewView({
   user,
   customer,
@@ -106,7 +118,7 @@ export default function UserOverviewView({
 
   const incidentSnapshots = useMemo(() => {
     return dbAlerts
-      .filter(a => a.imageUrl && typeof a.imageUrl === 'string' && a.imageUrl.trim() !== '')
+      .filter(a => (a.imageUrl && typeof a.imageUrl === 'string' && a.imageUrl.trim() !== '') || a.cloudFileId)
       .slice(0, 4);
   }, [dbAlerts]);
 
@@ -423,7 +435,7 @@ export default function UserOverviewView({
             <div>
               <p className="text-xs text-slate-400 font-medium">Incident Snapshots</p>
               <h2 className="text-3xl font-black text-white tracking-tight mt-0.5">
-                {dbAlerts.filter(a => a.imageUrl && a.imageUrl.trim() !== '').length}
+                {dbAlerts.filter(a => (a.imageUrl && a.imageUrl.trim() !== '') || a.cloudFileId).length}
               </h2>
             </div>
             <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-[#162a3f] text-[#38bdf8] border border-[#38bdf8]/30">
@@ -827,14 +839,14 @@ export default function UserOverviewView({
                     camera: item.cameraKey,
                     time: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                     date: new Date(item.timestamp).toLocaleDateString(),
-                    src: item.imageUrl,
+                    src: getDisplayableImageUrl(item.imageUrl, item.cloudFileId),
                     severity: item.severity,
                     resolution: '1920x1080'
                   })}
                   className="group relative rounded-xl overflow-hidden aspect-[4/3] bg-black/40 border border-[#2b2d42] cursor-pointer hover:border-orange-500/50 transition-all duration-200"
                 >
                   <img
-                    src={item.imageUrl}
+                    src={getDisplayableImageUrl(item.imageUrl, item.cloudFileId)} referrerPolicy="no-referrer"
                     alt={item.message || 'Alert Frame'}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                   />
@@ -993,7 +1005,7 @@ export default function UserOverviewView({
             {/* Modal Body: Image */}
             <div className="p-4 bg-black/60 flex items-center justify-center">
               <img
-                src={selectedUploadPreview.src}
+                src={selectedUploadPreview.src} referrerPolicy="no-referrer"
                 alt={selectedUploadPreview.title}
                 className="max-h-[65vh] w-auto rounded-lg object-contain border border-[#2b304c]"
               />

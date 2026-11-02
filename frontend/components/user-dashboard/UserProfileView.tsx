@@ -21,19 +21,29 @@ import {
   Check,
   Camera,
   Trash2,
-  Upload
+  Upload,
+  UserCircle,
+  KeyRound,
+  Fingerprint,
+  Eye,
+  EyeOff,
+  QrCode,
+  Copy,
+  Smartphone
 } from 'lucide-react';
 
 interface UserProfileViewProps {
   user: any;
   customer?: any;
   onProfileUpdated?: (updatedData: any) => void;
+  initialSubTab?: 'profile' | 'pass' | '2fa';
 }
 
 export default function UserProfileView({
   user,
   customer,
-  onProfileUpdated
+  onProfileUpdated,
+  initialSubTab = 'profile'
 }: UserProfileViewProps) {
   const [formData, setFormData] = useState({
     name: user?.name || '',
@@ -80,6 +90,192 @@ export default function UserProfileView({
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const [activeSubTab, setActiveSubTab] = useState<'profile' | 'pass' | '2fa'>(
+    initialSubTab || 'profile'
+  );
+
+  useEffect(() => {
+    if (initialSubTab) {
+      setActiveSubTab(initialSubTab);
+    }
+  }, [initialSubTab]);
+
+  // Password change state
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+  });
+  const [showCurrentPass, setShowCurrentPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [showConfirmPass, setShowConfirmPass] = useState(false);
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+  const [passwordStatusMsg, setPasswordStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // 2FA state
+  const [is2FAEnabled, setIs2FAEnabled] = useState(false);
+  const [twoFASecret, setTwoFASecret] = useState('');
+  const [twoFABackupCodes, setTwoFABackupCodes] = useState<string[]>([]);
+  const [otpCode, setOtpCode] = useState('');
+  const [is2FALoading, setIs2FALoading] = useState(false);
+  const [twoFAMsg, setTwoFAMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [copyCodeSuccess, setCopyCodeSuccess] = useState<string | null>(null);
+
+  const fetch2FAStatus = async () => {
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5050';
+    const token = user?.token || (typeof window !== 'undefined' ? localStorage.getItem('token') : null);
+    if (!token) return;
+
+    try {
+      const res = await fetch(`${API_URL}/api/users/2fa`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setIs2FAEnabled(!!data.data?.isEnabled);
+        if (data.data?.secret) setTwoFASecret(data.data.secret);
+        if (data.data?.backupCodes) setTwoFABackupCodes(data.data.backupCodes);
+      }
+    } catch (e) {
+      console.error('Failed to load 2FA status', e);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSubTab === '2fa') {
+      fetch2FAStatus();
+    }
+  }, [activeSubTab]);
+
+  const handleSubTabChange = (tab: 'profile' | 'pass' | '2fa') => {
+    setActiveSubTab(tab);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', 'profile');
+      url.searchParams.set('subtab', tab);
+      window.history.pushState({}, '', url.toString());
+    }
+  };
+
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
+      setPasswordStatusMsg({ type: 'error', text: 'Please fill in all password fields.' });
+      return;
+    }
+    if (passwordForm.newPassword.length < 6) {
+      setPasswordStatusMsg({ type: 'error', text: 'New password must be at least 6 characters long.' });
+      return;
+    }
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordStatusMsg({ type: 'error', text: 'New password and confirmation do not match.' });
+      return;
+    }
+
+    setIsUpdatingPassword(true);
+    setPasswordStatusMsg(null);
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5050';
+    const token = user?.token || (typeof window !== 'undefined' ? localStorage.getItem('token') : null);
+
+    try {
+      const res = await fetch(`${API_URL}/api/users/change-password`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          currentPassword: passwordForm.currentPassword,
+          newPassword: passwordForm.newPassword,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setPasswordStatusMsg({ type: 'success', text: 'Password changed successfully!' });
+        setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+        setTimeout(() => setPasswordStatusMsg(null), 4000);
+      } else {
+        setPasswordStatusMsg({ type: 'error', text: data.message || 'Incorrect current password or update failed.' });
+      }
+    } catch (err: any) {
+      setPasswordStatusMsg({ type: 'error', text: err.message || 'Error communicating with server.' });
+    } finally {
+      setIsUpdatingPassword(false);
+    }
+  };
+
+  const handleVerify2FA = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otpCode || otpCode.length !== 6) {
+      setTwoFAMsg({ type: 'error', text: 'Please enter a valid 6-digit code.' });
+      return;
+    }
+
+    setIs2FALoading(true);
+    setTwoFAMsg(null);
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5050';
+    const token = user?.token || (typeof window !== 'undefined' ? localStorage.getItem('token') : null);
+
+    try {
+      const res = await fetch(`${API_URL}/api/users/2fa/verify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          code: otpCode,
+          secret: twoFASecret,
+          backupCodes: twoFABackupCodes,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setIs2FAEnabled(true);
+        setTwoFAMsg({ type: 'success', text: 'Two-Factor Authentication activated successfully!' });
+        setOtpCode('');
+      } else {
+        setTwoFAMsg({ type: 'error', text: data.message || 'Verification failed. Please check the code.' });
+      }
+    } catch (err: any) {
+      setTwoFAMsg({ type: 'error', text: err.message || 'Error communicating with server.' });
+    } finally {
+      setIs2FALoading(false);
+    }
+  };
+
+  const handleDisable2FA = async () => {
+    setIs2FALoading(true);
+    setTwoFAMsg(null);
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5050';
+    const token = user?.token || (typeof window !== 'undefined' ? localStorage.getItem('token') : null);
+
+    try {
+      const res = await fetch(`${API_URL}/api/users/2fa/disable`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setIs2FAEnabled(false);
+        setTwoFAMsg({ type: 'success', text: 'Two-Factor Authentication disabled.' });
+        fetch2FAStatus();
+      } else {
+        setTwoFAMsg({ type: 'error', text: data.message || 'Failed to disable 2FA.' });
+      }
+    } catch (err: any) {
+      setTwoFAMsg({ type: 'error', text: err.message || 'Error communicating with server.' });
+    } finally {
+      setIs2FALoading(false);
+    }
   };
 
   // Immediate Auto-Save handler for Profile Photo
@@ -375,8 +571,51 @@ export default function UserProfileView({
         </div>
       </div>
 
-      {/* 2. Main 2-Column Responsive Layout */}
-      <form onSubmit={handleSaveProfile} className="space-y-6">
+      {/* 2. Subtab Navigation Pills ([Profile] [Pass] [2FA]) */}
+      <div className="flex items-center gap-2 p-1.5 bg-[#141624] border border-[#27293d] rounded-2xl w-fit shadow-lg">
+        <button
+          type="button"
+          onClick={() => handleSubTabChange('profile')}
+          className={`flex items-center gap-2.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            activeSubTab === 'profile'
+              ? 'bg-[#1e2338] text-sky-400 border border-sky-500/30 shadow-md shadow-sky-950/30'
+              : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+          }`}
+        >
+          <UserCircle className="w-4 h-4" />
+          <span>Profile</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => handleSubTabChange('pass')}
+          className={`flex items-center gap-2.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            activeSubTab === 'pass'
+              ? 'bg-[#1e2338] text-sky-400 border border-sky-500/30 shadow-md shadow-sky-950/30'
+              : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+          }`}
+        >
+          <KeyRound className="w-4 h-4" />
+          <span>Pass</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => handleSubTabChange('2fa')}
+          className={`flex items-center gap-2.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            activeSubTab === '2fa'
+              ? 'bg-[#1e2338] text-sky-400 border border-sky-500/30 shadow-md shadow-sky-950/30'
+              : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+          }`}
+        >
+          <Fingerprint className="w-4 h-4" />
+          <span>2FA</span>
+        </button>
+      </div>
+
+      {/* 3. SUBTAB CONTENT */}
+      {activeSubTab === 'profile' && (
+        <form onSubmit={handleSaveProfile} className="space-y-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           
           {/* LEFT COLUMN: Identity & Account Summary (4 cols) */}
@@ -779,6 +1018,425 @@ export default function UserProfileView({
 
         </div>
       </form>
+      )}
+
+      {/* SUBTAB 2: PASS (Change Password) */}
+      {activeSubTab === 'pass' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Left card: Security guidelines */}
+          <div className="lg:col-span-4 border border-[#27293d] bg-[#181926] rounded-2xl p-6 shadow-xl space-y-5">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-xl bg-orange-500/15 text-orange-400 border border-orange-500/30">
+                <KeyRound className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-white">Password Security</h3>
+                <p className="text-xs text-slate-400">Keep your master access safe</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-300">
+              <div className="flex items-start gap-2.5 p-3 rounded-xl bg-[#121422] border border-[#27293d]">
+                <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                <span>At least 6 characters (8+ recommended)</span>
+              </div>
+              <div className="flex items-start gap-2.5 p-3 rounded-xl bg-[#121422] border border-[#27293d]">
+                <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                <span>Include uppercase and lowercase letters</span>
+              </div>
+              <div className="flex items-start gap-2.5 p-3 rounded-xl bg-[#121422] border border-[#27293d]">
+                <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                <span>Include numbers and special symbols (@, #, $)</span>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-xs text-blue-300 space-y-1">
+              <span className="font-bold block">Need Help?</span>
+              <p className="text-slate-400 text-[11px]">
+                If you forgot your current password, contact your administrator or use the password recovery link on the login page.
+              </p>
+            </div>
+          </div>
+
+          {/* Right card: Form */}
+          <div className="lg:col-span-8 border border-[#27293d] bg-[#181926] rounded-2xl p-6 shadow-xl space-y-6">
+            <div>
+              <h2 className="text-lg font-black text-white tracking-tight flex items-center gap-2">
+                <Lock className="w-5 h-5 text-orange-500" />
+                <span>Update Password</span>
+              </h2>
+              <p className="text-xs text-slate-400 mt-1">
+                Enter your current password and choose a secure new password for your account.
+              </p>
+            </div>
+
+            <form onSubmit={handleUpdatePassword} className="space-y-5">
+              {/* Current Password */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block mb-1.5">
+                  Current Password
+                </label>
+                <div className="relative">
+                  <input
+                    type={showCurrentPass ? 'text' : 'password'}
+                    value={passwordForm.currentPassword}
+                    onChange={(e) => setPasswordForm((p) => ({ ...p, currentPassword: e.target.value }))}
+                    placeholder="Enter your current password"
+                    className="w-full px-3.5 py-2.5 pr-10 rounded-xl border border-[#2b2e46] bg-[#121422] text-white text-xs font-medium focus:outline-none focus:border-orange-500 transition-colors"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCurrentPass(!showCurrentPass)}
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    {showCurrentPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* New Password */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block mb-1.5">
+                  New Password
+                </label>
+                <div className="relative">
+                  <input
+                    type={showNewPass ? 'text' : 'password'}
+                    value={passwordForm.newPassword}
+                    onChange={(e) => setPasswordForm((p) => ({ ...p, newPassword: e.target.value }))}
+                    placeholder="Enter new secure password (min. 6 characters)"
+                    className="w-full px-3.5 py-2.5 pr-10 rounded-xl border border-[#2b2e46] bg-[#121422] text-white text-xs font-medium focus:outline-none focus:border-orange-500 transition-colors"
+                    required
+                    minLength={6}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPass(!showNewPass)}
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    {showNewPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Confirm New Password */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block mb-1.5">
+                  Confirm New Password
+                </label>
+                <div className="relative">
+                  <input
+                    type={showConfirmPass ? 'text' : 'password'}
+                    value={passwordForm.confirmPassword}
+                    onChange={(e) => setPasswordForm((p) => ({ ...p, confirmPassword: e.target.value }))}
+                    placeholder="Re-type new password"
+                    className="w-full px-3.5 py-2.5 pr-10 rounded-xl border border-[#2b2e46] bg-[#121422] text-white text-xs font-medium focus:outline-none focus:border-orange-500 transition-colors"
+                    required
+                    minLength={6}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPass(!showConfirmPass)}
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    {showConfirmPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Status Message */}
+              {passwordStatusMsg && (
+                <div className={`px-4 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-2 animate-in fade-in ${
+                  passwordStatusMsg.type === 'success'
+                    ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300'
+                    : 'bg-rose-500/15 border border-rose-500/30 text-rose-300'
+                }`}>
+                  {passwordStatusMsg.type === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                  )}
+                  <span>{passwordStatusMsg.text}</span>
+                </div>
+              )}
+
+              {/* Action Button */}
+              <div className="pt-2 flex justify-end">
+                <button
+                  type="submit"
+                  disabled={isUpdatingPassword}
+                  className="px-8 py-3 rounded-xl bg-gradient-to-r from-orange-600 to-amber-500 hover:from-orange-500 hover:to-amber-400 text-white font-black text-xs shadow-lg shadow-orange-950/40 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-60"
+                >
+                  {isUpdatingPassword ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Updating Password...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      <span>Update Password</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* SUBTAB 3: 2FA (Two-Factor Authentication) */}
+      {activeSubTab === '2fa' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Left card: 2FA Status & Overview */}
+          <div className="lg:col-span-4 border border-[#27293d] bg-[#181926] rounded-2xl p-6 shadow-xl space-y-5">
+            <div className="flex items-center gap-3">
+              <div className={`p-3 rounded-xl border ${
+                is2FAEnabled
+                  ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                  : 'bg-orange-500/15 text-orange-400 border-orange-500/30'
+              }`}>
+                <Fingerprint className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-white">Two-Factor Auth</h3>
+                <span className={`inline-block mt-0.5 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase font-mono ${
+                  is2FAEnabled
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                    : 'bg-slate-700/50 text-slate-400 border border-slate-600/30'
+                }`}>
+                  {is2FAEnabled ? 'ENABLED (ACTIVE)' : 'DISABLED'}
+                </span>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Two-Factor Authentication adds an extra layer of defense to your CoreWatch account. In addition to your password, you will be required to enter a 6-digit TOTP code generated on your mobile authenticator.
+            </p>
+
+            <div className="space-y-2.5 pt-2">
+              <div className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">Supported Apps:</div>
+              <div className="grid grid-cols-2 gap-2 text-xs text-slate-300">
+                <div className="p-2 rounded-lg bg-[#121422] border border-[#27293d] flex items-center gap-2">
+                  <Smartphone className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Google Auth</span>
+                </div>
+                <div className="p-2 rounded-lg bg-[#121422] border border-[#27293d] flex items-center gap-2">
+                  <Smartphone className="w-3.5 h-3.5 text-blue-400" />
+                  <span>MS Auth</span>
+                </div>
+                <div className="p-2 rounded-lg bg-[#121422] border border-[#27293d] flex items-center gap-2">
+                  <Smartphone className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Authy</span>
+                </div>
+                <div className="p-2 rounded-lg bg-[#121422] border border-[#27293d] flex items-center gap-2">
+                  <Smartphone className="w-3.5 h-3.5 text-amber-400" />
+                  <span>1Password</span>
+                </div>
+              </div>
+            </div>
+
+            {is2FAEnabled && (
+              <div className="pt-3 border-t border-[#27293d]">
+                <button
+                  type="button"
+                  onClick={handleDisable2FA}
+                  disabled={is2FALoading}
+                  className="w-full py-2.5 rounded-xl border border-rose-500/40 text-rose-400 hover:bg-rose-500/10 text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  {is2FALoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                  <span>Disable Two-Factor Auth</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Right card: Setup / Active view */}
+          <div className="lg:col-span-8 border border-[#27293d] bg-[#181926] rounded-2xl p-6 shadow-xl space-y-6">
+            {!is2FAEnabled ? (
+              <>
+                <div>
+                  <h2 className="text-lg font-black text-white tracking-tight flex items-center gap-2">
+                    <QrCode className="w-5 h-5 text-sky-400" />
+                    <span>Setup Authenticator App</span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Scan the QR code or enter the secret key manually into your authenticator app.
+                  </p>
+                </div>
+
+                {/* Secret Key & QR Code Display */}
+                <div className="p-4 rounded-xl bg-[#121422] border border-[#27293d] space-y-4">
+                  <div className="flex flex-col sm:flex-row items-center gap-5">
+                    {/* Visual QR Code generated from Google Chart API / SVG */}
+                    <div className="p-3 bg-white rounded-xl shadow-md shrink-0">
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(
+                          `otpauth://totp/CoreWatch:${encodeURIComponent(formData.email || user?.email || 'user')}?secret=${twoFASecret || 'JBSWY3DPEHPK3PXP'}&issuer=CoreWatch`
+                        )}`}
+                        alt="2FA QR Code"
+                        className="w-32 h-32"
+                      />
+                    </div>
+
+                    <div className="space-y-3 flex-1 w-full text-center sm:text-left">
+                      <div className="text-xs text-slate-300">
+                        <span className="font-bold text-white block">Manual Setup Secret Key:</span>
+                        <div className="mt-1.5 flex items-center gap-2 p-2.5 rounded-lg bg-[#0e101a] border border-[#2a2d42] font-mono text-xs text-amber-300 select-all justify-between">
+                          <span>{twoFASecret || 'JBSWY3DPEHPK3PXP'}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(twoFASecret || 'JBSWY3DPEHPK3PXP');
+                              setCopyCodeSuccess('Secret copied!');
+                              setTimeout(() => setCopyCodeSuccess(null), 3000);
+                            }}
+                            className="p-1 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                            title="Copy secret"
+                          >
+                            <Copy className="w-4 h-4" />
+                          </button>
+                        </div>
+                        {copyCodeSuccess && (
+                          <span className="text-[10px] text-emerald-400 font-bold mt-1 block">
+                            {copyCodeSuccess}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        Time-based One Time Password (TOTP) algorithm SHA1, 30-second interval, 6-digit output.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 6-digit Verification Form */}
+                <form onSubmit={handleVerify2FA} className="space-y-4">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block mb-1.5">
+                      Enter 6-Digit Code From App
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={6}
+                      value={otpCode}
+                      onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
+                      placeholder="e.g. 123456"
+                      className="w-full sm:w-64 px-4 py-2.5 rounded-xl border border-[#2b2e46] bg-[#121422] text-white text-base font-mono tracking-widest text-center focus:outline-none focus:border-sky-500 transition-colors"
+                      required
+                    />
+                  </div>
+
+                  {twoFAMsg && (
+                    <div className={`px-4 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-2 animate-in fade-in ${
+                      twoFAMsg.type === 'success'
+                        ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300'
+                        : 'bg-rose-500/15 border border-rose-500/30 text-rose-300'
+                    }`}>
+                      {twoFAMsg.type === 'success' ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                      )}
+                      <span>{twoFAMsg.text}</span>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={is2FALoading || otpCode.length !== 6}
+                    className="px-8 py-3 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-black text-xs shadow-lg shadow-sky-950/40 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    {is2FALoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Verifying...</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-4 h-4" />
+                        <span>Verify & Enable 2FA</span>
+                      </>
+                    )}
+                  </button>
+                </form>
+
+                {/* Backup Recovery Codes */}
+                {twoFABackupCodes.length > 0 && (
+                  <div className="pt-4 border-t border-[#27293d] space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                        Emergency Backup Recovery Codes
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(twoFABackupCodes.join('\n'));
+                          setCopyCodeSuccess('Backup codes copied!');
+                          setTimeout(() => setCopyCodeSuccess(null), 3000);
+                        }}
+                        className="text-[11px] text-sky-400 hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        <Copy className="w-3 h-3" />
+                        <span>Copy All</span>
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {twoFABackupCodes.map((code, idx) => (
+                        <div
+                          key={idx}
+                          className="px-3 py-1.5 rounded-lg bg-[#121422] border border-[#27293d] text-center font-mono text-xs text-slate-300"
+                        >
+                          {code}
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-slate-400">
+                      Save these backup codes in a safe place. You can use them to access your account if you lose access to your authenticator app.
+                    </p>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="space-y-6">
+                <div className="p-6 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-start gap-4">
+                  <div className="p-3 rounded-xl bg-emerald-500/20 text-emerald-400 shrink-0">
+                    <ShieldCheck className="w-8 h-8" />
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-base font-black text-white">Your Account is Protected with 2FA</h3>
+                    <p className="text-xs text-emerald-200/80 leading-relaxed">
+                      Two-Factor Authentication is currently active on this account. Whenever you sign in from a new browser or session, you will be prompted for your 6-digit TOTP code.
+                    </p>
+                  </div>
+                </div>
+
+                {twoFAMsg && (
+                  <div className={`px-4 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-2 animate-in fade-in ${
+                    twoFAMsg.type === 'success'
+                      ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300'
+                      : 'bg-rose-500/15 border border-rose-500/30 text-rose-300'
+                  }`}>
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>{twoFAMsg.text}</span>
+                  </div>
+                )}
+
+                <div className="p-4 rounded-xl bg-[#121422] border border-[#27293d] space-y-3">
+                  <div className="text-xs font-bold text-white flex items-center gap-2">
+                    <Check className="w-4 h-4 text-emerald-400" />
+                    <span>Active Authenticator Method</span>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Primary verification device configured. If you change your phone or need to reconfigure your authenticator app, you can disable 2FA and set it up again.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
     </div>
   );

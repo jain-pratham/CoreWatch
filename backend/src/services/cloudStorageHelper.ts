@@ -22,6 +22,7 @@ export interface CloudUploadResult {
   fileId?: string;
   webViewLink?: string;
   webContentLink?: string;
+  directImageUrl?: string;
   folderPath?: string;
   error?: string;
 }

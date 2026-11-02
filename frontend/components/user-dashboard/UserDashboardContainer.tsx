@@ -61,6 +61,7 @@ interface UserDashboardContainerProps {
   isCameraLimitReached: boolean;
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  subtab?: 'profile' | 'pass' | '2fa';
   onLogout: () => void;
   // Camera Modal functions from page
   openViewModal: (cam: any) => void;
@@ -123,6 +124,7 @@ export default function UserDashboardContainer({
   isCameraLimitReached,
   activeTab,
   setActiveTab,
+  subtab = 'profile',
   onLogout,
   openViewModal,
   openSettingsModal,
@@ -306,7 +308,7 @@ export default function UserDashboardContainer({
   const currentStreamUrl = activeCam?.streamUrl || activeCam?.rtspUrl || 'http://192.0.0.4:8080/video';
 
   return (
-    <div className="min-h-screen bg-[#0e0f18] text-slate-100 flex flex-col font-sans selection:bg-orange-500 selection:text-white">
+    <div className="dark min-h-screen bg-[#0e0f18] text-slate-100 flex flex-col font-sans selection:bg-orange-500 selection:text-white">
       
       {/* 1. TOP HORIZONTAL NAVBAR */}
       <UserNavbar
@@ -510,6 +512,7 @@ export default function UserDashboardContainer({
           <UserProfileView
             user={user}
             customer={customer}
+            initialSubTab={subtab}
             onProfileUpdated={(updated) => {
               if (setUser) {
                 setUser((prev: any) => ({ ...prev, ...updated }));

@@ -122,7 +122,7 @@ export default function ZoneCameraCanvas({
   return (
     <div className="space-y-4">
       {/* 16:9 Aspect Video Container with Overlay */}
-      <div className="relative aspect-video w-full rounded-2xl border border-border bg-[#020415] overflow-hidden shadow-2xl group select-none">
+      <div className="relative aspect-video w-full rounded-2xl border border-[#27293d] bg-[#020415] overflow-hidden shadow-2xl group select-none">
         
         {/* CCTV Scanline/Grid CSS Effects */}
         <div className="absolute inset-0 pointer-events-none z-10 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[size:100%_4px,3px_100%] opacity-40"></div>
@@ -302,7 +302,7 @@ export default function ZoneCameraCanvas({
 
         {/* Safe Area Guides HUD info */}
         {isDrawing && (
-          <div className="absolute bottom-4 right-4 bg-black/60 border border-border px-3 py-1.5 rounded-lg text-[10px] text-brand-cream/80 font-bold z-20 select-none animate-pulse">
+          <div className="absolute bottom-4 right-4 bg-black/70 border border-[#27293d] px-3.5 py-1.5 rounded-xl text-[10px] text-orange-300 font-bold z-20 select-none animate-pulse">
             Drawing Mode Active · Click Canvas to Plot · Click first point to Close
           </div>
         )}
@@ -314,7 +314,7 @@ export default function ZoneCameraCanvas({
           <button
             onClick={onUndoLastPoint}
             disabled={newPoints.length === 0}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-border hover:bg-muted font-bold text-foreground cursor-pointer disabled:opacity-50 transition-colors"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#27293d] bg-[#161826] hover:bg-[#1f2238] font-bold text-slate-200 cursor-pointer disabled:opacity-50 transition-colors"
           >
             <Undo2 className="w-3.5 h-3.5" />
             <span>Undo Point</span>
@@ -322,14 +322,14 @@ export default function ZoneCameraCanvas({
           <button
             onClick={onClearPoints}
             disabled={newPoints.length === 0}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-border hover:bg-muted text-red-500 font-bold cursor-pointer disabled:opacity-50 transition-colors"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#27293d] bg-[#161826] hover:bg-rose-500/10 text-rose-400 font-bold cursor-pointer disabled:opacity-50 transition-colors"
           >
             <Trash2 className="w-3.5 h-3.5" />
             <span>Clear Grid</span>
           </button>
           <button
             onClick={onCancelDrawing}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-border hover:bg-muted font-bold cursor-pointer transition-colors"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-[#27293d] bg-[#161826] hover:bg-[#1f2238] font-bold text-slate-300 cursor-pointer transition-colors"
           >
             <X className="w-3.5 h-3.5" />
             <span>Cancel</span>
@@ -337,7 +337,7 @@ export default function ZoneCameraCanvas({
           <button
             onClick={onCompleteDrawing}
             disabled={newPoints.length < 3}
-            className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-brand-gold hover:bg-brand-gold-light text-[#FAF6EE] font-bold cursor-pointer disabled:opacity-50 transition-colors"
+            className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold cursor-pointer disabled:opacity-50 transition-colors shadow-lg shadow-orange-950/40"
           >
             <Check className="w-3.5 h-3.5" />
             <span>Complete Zone</span>

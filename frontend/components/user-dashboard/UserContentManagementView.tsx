@@ -13,11 +13,23 @@ import {
   Calendar,
   CheckCircle2,
   X,
-  Maximize2
+  Maximize2,
+  ExternalLink
 } from 'lucide-react';
 
 interface UserContentManagementViewProps {
   dbAlerts: any[];
+}
+
+function getDisplayableImageUrl(url?: string, cloudFileId?: string): string {
+  if (!url && !cloudFileId) return '';
+  if (cloudFileId) {
+    return `/api/evidence-image?fileId=${cloudFileId}`;
+  }
+  if (url && (url.includes('lh3.googleusercontent.com') || url.includes('drive.google.com'))) {
+    return `/api/evidence-image?url=${encodeURIComponent(url)}`;
+  }
+  return url || '';
 }
 
 export default function UserContentManagementView({ dbAlerts }: UserContentManagementViewProps) {
@@ -26,13 +38,14 @@ export default function UserContentManagementView({ dbAlerts }: UserContentManag
   const [selectedPreview, setSelectedPreview] = useState<any | null>(null);
 
   const realGalleryItems = (dbAlerts || [])
-    .filter((a: any) => a.imageUrl && typeof a.imageUrl === 'string' && a.imageUrl.trim() !== '')
+    .filter((a: any) => (a.imageUrl && typeof a.imageUrl === 'string' && a.imageUrl.trim() !== '') || a.cloudFileId)
     .map((a: any) => ({
       id: a._id || a.id,
       title: a.message || 'AI Security Incident',
       camera: a.cameraKey || 'Camera Feed',
       date: new Date(a.timestamp).toLocaleString(),
-      src: a.imageUrl,
+      src: getDisplayableImageUrl(a.imageUrl, a.cloudFileId),
+      cloudViewLink: a.cloudViewLink || (a.cloudFileId ? `https://drive.google.com/file/d/${a.cloudFileId}/view?usp=sharing` : undefined),
       category: a.category || 'Security Breach',
       resolution: '1920x1080',
       severity: a.severity || 'HIGH',
@@ -98,10 +111,11 @@ export default function UserContentManagementView({ dbAlerts }: UserContentManag
                   className="p-4 rounded-xl border border-[#27293d] bg-[#121422] flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between text-xs hover:border-orange-500/40 transition-colors"
                 >
                   <div className="flex items-center gap-3.5 min-w-0">
-                    {alert.imageUrl ? (
+                    {(alert.imageUrl || alert.cloudFileId) ? (
                       <img 
-                        src={alert.imageUrl} 
+                        src={getDisplayableImageUrl(alert.imageUrl, alert.cloudFileId)} 
                         alt="Alert Snapshot" 
+                        referrerPolicy="no-referrer"
                         className="w-16 h-12 object-cover rounded-lg border border-[#2b2e46] shrink-0" 
                       />
                     ) : (
@@ -191,6 +205,7 @@ export default function UserContentManagementView({ dbAlerts }: UserContentManag
                   <img
                     src={item.src}
                     alt={item.title}
+                    referrerPolicy="no-referrer"
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                   />
                   <div className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/70 text-white opacity-0 group-hover:opacity-100 transition-opacity">
@@ -252,9 +267,30 @@ export default function UserContentManagementView({ dbAlerts }: UserContentManag
               <img
                 src={selectedPreview.src}
                 alt={selectedPreview.title}
+                referrerPolicy="no-referrer"
                 className="max-h-[65vh] w-auto rounded-lg object-contain border border-[#2b304c]"
               />
             </div>
+            {selectedPreview.cloudViewLink && (
+              <div className="p-3 bg-[#121422] border-t border-[#2b304c] flex items-center justify-between">
+                <a
+                  href={selectedPreview.cloudViewLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3.5 py-1.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 font-bold text-xs flex items-center gap-1.5 transition-all"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Open in Google Drive</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setSelectedPreview(null)}
+                  className="px-4 py-1.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-bold text-xs cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

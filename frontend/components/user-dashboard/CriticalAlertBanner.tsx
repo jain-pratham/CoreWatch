@@ -24,6 +24,18 @@ interface CriticalAlertBannerProps {
   onOpenAlertCenter: () => void;
 }
 
+
+function getDisplayableImageUrl(url?: string, cloudFileId?: string): string {
+  if (!url && !cloudFileId) return '';
+  if (cloudFileId) {
+    return `/api/evidence-image?fileId=${cloudFileId}`;
+  }
+  if (url && (url.includes('lh3.googleusercontent.com') || url.includes('drive.google.com'))) {
+    return `/api/evidence-image?url=${encodeURIComponent(url)}`;
+  }
+  return url || '';
+}
+
 export default function CriticalAlertBanner({
   criticalAlert,
   onAcknowledge,
@@ -112,7 +124,7 @@ export default function CriticalAlertBanner({
           <div className="flex flex-wrap items-center gap-2 sm:gap-3 self-end lg:self-center">
             
             {/* Snapshot Thumbnail if present */}
-            {criticalAlert.imageUrl && (
+            {(criticalAlert.imageUrl || criticalAlert.cloudFileId) && (
               <button
                 type="button"
                 onClick={() => setPreviewOpen(true)}
@@ -120,7 +132,7 @@ export default function CriticalAlertBanner({
                 title="Click to view full snapshot"
               >
                 <img
-                  src={criticalAlert.imageUrl}
+                  src={getDisplayableImageUrl(criticalAlert.imageUrl, criticalAlert.cloudFileId)} referrerPolicy="no-referrer"
                   alt="Incident snapshot"
                   className="w-full h-full object-cover group-hover:scale-110 transition-transform"
                 />
@@ -182,7 +194,7 @@ export default function CriticalAlertBanner({
       </div>
 
       {/* Snapshot Lightbox Preview Modal */}
-      {previewOpen && criticalAlert.imageUrl && (
+      {previewOpen && (criticalAlert.imageUrl || criticalAlert.cloudFileId) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in duration-200">
           <div className="relative max-w-4xl w-full bg-[#161826] border border-[#2b304c] rounded-2xl overflow-hidden shadow-2xl">
             <div className="p-4 border-b border-[#2b304c] flex items-center justify-between">
@@ -202,12 +214,25 @@ export default function CriticalAlertBanner({
             </div>
             <div className="p-4 bg-black/80 flex items-center justify-center max-h-[70vh] overflow-hidden">
               <img
-                src={criticalAlert.imageUrl}
+                src={getDisplayableImageUrl(criticalAlert.imageUrl, criticalAlert.cloudFileId)} referrerPolicy="no-referrer"
                 alt="Security incident evidence"
                 className="max-h-[65vh] w-auto object-contain rounded-lg shadow-lg border border-red-500/40"
               />
             </div>
-            <div className="p-3 bg-[#121422] border-t border-[#2b304c] flex justify-end">
+            <div className="p-3 bg-[#121422] border-t border-[#2b304c] flex items-center justify-between">
+              {(criticalAlert.cloudViewLink || criticalAlert.cloudFileId) ? (
+                <a
+                  href={criticalAlert.cloudViewLink || `https://drive.google.com/file/d/${criticalAlert.cloudFileId}/view?usp=sharing`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3.5 py-1.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 font-bold text-xs flex items-center gap-1.5 transition-all"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Open in Google Drive</span>
+                </a>
+              ) : (
+                <div />
+              )}
               <button
                 type="button"
                 onClick={() => setPreviewOpen(false)}

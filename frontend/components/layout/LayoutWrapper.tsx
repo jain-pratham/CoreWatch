@@ -52,7 +52,7 @@ function MainLayoutContent({ children }: { children: React.ReactNode }) {
         items={NAVIGATION_ITEMS}
         user={dummyUser}
         logoIcon={LayoutDashboard}
-        logoTitle="MY BRAND"
+        logoTitle="COREWATCH"
         logoSubtitle="Control Center"
         profileHref="/profile"
         changePasswordHref="/settings/password"

@@ -405,12 +405,24 @@ export const testCloudEvidenceUpload = async (req: Request, res: Response): Prom
     const userId = (req as any).user?._id || req.body.userId;
     const userEmail = (req as any).user?.email || req.body.userEmail;
 
-    let buffer: Buffer;
+    let buffer: Buffer | null = null;
     const customImage = req.body.image || req.body.snapshotBase64;
     if (customImage && typeof customImage === "string") {
-      const matches = customImage.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
-      buffer = matches ? Buffer.from(matches[2], "base64") : Buffer.from(customImage, "base64");
-    } else {
+      if (customImage.startsWith("http://") || customImage.startsWith("https://")) {
+        try {
+          const resp = await fetch(customImage);
+          const arrayBuffer = await resp.arrayBuffer();
+          buffer = Buffer.from(arrayBuffer);
+        } catch (fetchErr) {
+          console.warn("Failed to fetch image from URL:", fetchErr);
+        }
+      } else {
+        const matches = customImage.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
+        buffer = matches ? Buffer.from(matches[2], "base64") : Buffer.from(customImage, "base64");
+      }
+    }
+
+    if (!buffer) {
       // Create a 1x1 base64 transparent PNG buffer or small JPEG buffer as sample evidence
       const sampleJpegBase64 =
         "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=";
@@ -439,12 +451,17 @@ export const testCloudEvidenceUpload = async (req: Request, res: Response): Prom
       return;
     }
 
+    const directImageUrl = uploadRes.directImageUrl || (uploadRes.provider === "google_drive" && uploadRes.fileId
+      ? `https://lh3.googleusercontent.com/d/${uploadRes.fileId}`
+      : uploadRes.webViewLink);
+
     res.json({
       success: true,
       message: `Verified snapshot uploaded successfully to ${uploadRes.provider === "google_drive" ? "Google Drive" : "OneDrive"}!`,
       provider: uploadRes.provider,
       fileId: uploadRes.fileId,
       webViewLink: uploadRes.webViewLink,
+      directImageUrl,
       folderPath: uploadRes.folderPath,
       filename,
     });

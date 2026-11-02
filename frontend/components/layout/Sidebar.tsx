@@ -1,5 +1,6 @@
 "use client";
 
+import CoreWatchLogo from "../common/CoreWatchLogo";
 import React, { useState, useCallback, useEffect, useRef, ComponentType } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -38,9 +39,9 @@ export interface SidebarProps {
     email?: string;
     role?: string;
   } | null;
-  logoIcon: ComponentType<{ className?: string }>;
-  logoTitle: string;
-  logoSubtitle: string;
+  logoIcon?: ComponentType<{ className?: string }>;
+  logoTitle?: string;
+  logoSubtitle?: string;
   profileHref: string;
   changePasswordHref: string;
   twoFactorHref: string;
@@ -368,27 +369,30 @@ const Sidebar = React.memo(function Sidebar({
       {/* Logo Header */}
       <div className="flex items-center justify-between border-b border-sidebar-foreground/15 dark:border-white/15 px-4 py-[14px] flex-shrink-0">
         {collapsed ? (
-          <div className="mx-auto flex h-8 w-8 items-center justify-center rounded-lg bg-sidebar-foreground/15 dark:bg-white/15 border border-sidebar-foreground/25 dark:border-white/25">
-            <LogoIcon className="h-4 w-4 text-sidebar-foreground dark:text-white" />
+          <div 
+            className="mx-auto flex items-center justify-center cursor-pointer transition-transform hover:scale-105" 
+            onClick={() => onCollapse?.(!collapsed)} 
+            title="CoreWatch"
+          >
+            <CoreWatchLogo className="h-8 w-auto" />
           </div>
         ) : (
           <>
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sidebar-foreground/15 dark:bg-white/15 border border-sidebar-foreground/25 dark:border-white/25">
-                <LogoIcon className="h-4 w-4 text-sidebar-foreground dark:text-white" />
-              </div>
-              <div>
-                <p className="text-[13px] font-bold text-sidebar-foreground dark:text-white leading-tight tracking-wide uppercase">
-                  {logoTitle}
-                </p>
-                <p className="text-[10px] font-semibold uppercase tracking-[1.5px] text-[var(--primary)] leading-tight">
-                  {logoSubtitle}
-                </p>
+            <div className="flex items-center gap-2.5 select-none">
+              <CoreWatchLogo className="h-9 w-auto shrink-0" />
+              <div className="flex flex-col">
+                <span className="text-[17px] font-black tracking-tight text-sidebar-foreground dark:text-white leading-tight">
+                  CoreWatch
+                </span>
+                <span className="text-[9px] font-bold uppercase tracking-[1.5px] text-[var(--primary)] leading-none mt-0.5">
+                  {logoSubtitle || "Control Center"}
+                </span>
               </div>
             </div>
             <button
               onClick={() => onCollapse?.(!collapsed)}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-sidebar-foreground/60 dark:text-sidebar-foreground dark:text-white/60 transition-colors hover:bg-sidebar-foreground/10 dark:bg-white/10 hover:text-sidebar-foreground dark:text-white"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-sidebar-foreground/60 dark:text-sidebar-foreground dark:text-white/60 transition-colors hover:bg-sidebar-foreground/10 dark:bg-white/10 hover:text-sidebar-foreground dark:text-white cursor-pointer"
+              title="Collapse sidebar"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
@@ -493,5 +497,3 @@ const Sidebar = React.memo(function Sidebar({
 });
 
 export default Sidebar;
-
-

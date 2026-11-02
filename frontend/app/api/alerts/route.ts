@@ -1,3 +1,4 @@
+import { uploadAlertEvidenceToDrive } from "@/lib/googleDriveUpload";
 import { NextResponse } from "next/server";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
@@ -409,13 +410,68 @@ export async function POST(request: Request) {
       ? description.trim()
       : finalReason;
 
-    // 4. Create the incident record in MongoDB
-    // Note: imageUrl starts empty because local image saving is disabled;
-    // only if an active cloud drive (Google Drive / OneDrive) is connected, it will be updated with the cloud link.
+    // 4. Sync evidence screenshot to connected Cloud Drive (Google Drive / OneDrive) if active
+    let finalImageUrl = "";
+    let cloudFileId: string | null = null;
+    let cloudViewLink: string | null = null;
+    let cloudProvider: string | null = null;
+
+    const imageToSync = (body as any).snapshotBase64 || (body as any).image || imageUrl;
+    if (imageToSync && userId) {
+      try {
+        // A. Primary direct in-process Google Drive upload (fast, reliable, zero localhost hop)
+        const driveResult = await uploadAlertEvidenceToDrive({
+          userId: userId.toString(),
+          cameraKey,
+          category: featureCategory || category || "Security Alert",
+          image: imageToSync,
+        });
+
+        if (driveResult.success && driveResult.fileId) {
+          finalImageUrl = driveResult.directImageUrl || `https://lh3.googleusercontent.com/d/${driveResult.fileId}`;
+          cloudFileId = driveResult.fileId;
+          cloudViewLink = driveResult.webViewLink || null;
+          cloudProvider = "google_drive";
+          console.log(`☁️ [Direct Cloud Vault] Synced alert evidence to Google Drive: ${driveResult.folderPath} (Direct CDN: ${finalImageUrl})`);
+        } else {
+          // B. Fallback to Express backend upload (for OneDrive or Express-hosted pipeline)
+          const backendUrl = process.env.NEXT_PUBLIC_API_URL || process.env.BACKEND_API_URL || "http://localhost:5050";
+          const cloudRes = await fetch(`${backendUrl}/api/integrations/test-upload`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              userId: userId.toString(),
+              cameraKey,
+              category: featureCategory || category || "Security Alert",
+              image: imageToSync,
+            }),
+          });
+          const cloudData = await cloudRes.json();
+          if (cloudData.success && cloudData.fileId) {
+            finalImageUrl = cloudData.directImageUrl || (cloudData.provider === "google_drive"
+              ? `https://lh3.googleusercontent.com/d/${cloudData.fileId}`
+              : cloudData.webViewLink);
+            cloudFileId = cloudData.fileId;
+            cloudViewLink = cloudData.webViewLink;
+            cloudProvider = cloudData.provider;
+            console.log(`☁️ [Cloud Storage] Synced alert evidence to ${cloudData.provider}: ${cloudData.folderPath} (URL: ${finalImageUrl})`);
+          } else {
+            console.log(`ℹ️ [Cloud Storage] Alert evidence photo skipped (Drive not connected): ${driveResult.error || cloudData.message || 'No active drive'}`);
+          }
+        }
+      } catch (syncErr: any) {
+        console.warn("Evidence cloud auto-sync note:", syncErr?.message || syncErr);
+      }
+    }
+
+    // 5. Create the incident record in MongoDB with the synced photo evidence (or empty if drive not connected)
     const newAlert = await Alert.create({
       cameraKey,
       userId,
-      imageUrl: "",
+      imageUrl: finalImageUrl,
+      cloudFileId,
+      cloudViewLink,
+      cloudProvider,
       timestamp: timestamp ? new Date(timestamp) : new Date(),
       message: message || "Security incident detected!",
       reason: finalReason,
@@ -430,41 +486,9 @@ export async function POST(request: Request) {
       isRead: false,
     });
 
-    console.log(`🚨 [Alerts API] Logged [${severity}] security incident for camera ${cameraKey} (${cameraDisplayName}) - Reason: ${finalReason}`);
+    console.log(`🚨 [Alerts API] Logged [${severity}] security incident for camera ${cameraKey} (${cameraDisplayName}) - Reason: ${finalReason} (Evidence Photo: ${finalImageUrl ? 'ATTACHED' : 'NONE'})`);
 
-    // Asynchronously sync evidence screenshot to active connected Cloud Drive (Google Drive / OneDrive)
-    if (imageUrl && userId) {
-      const backendPort = process.env.PORT || 5050;
-      const backendUrl = process.env.BACKEND_API_URL || `http://127.0.0.1:${backendPort}`;
-      fetch(`${backendUrl}/api/integrations/test-upload`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: userId.toString(),
-          cameraKey,
-          category: featureCategory || category || "Security Alert",
-          image: imageUrl,
-        }),
-      })
-        .then((res) => res.json())
-        .then((cloudData) => {
-          if (cloudData.success && cloudData.fileId && cloudData.webViewLink) {
-            Alert.findByIdAndUpdate(newAlert._id, {
-              imageUrl: cloudData.webViewLink,
-              cloudFileId: cloudData.fileId,
-              cloudViewLink: cloudData.webViewLink,
-              cloudProvider: cloudData.provider,
-            }).exec();
-            console.log(`☁️ [Cloud Storage] Synced alert evidence to ${cloudData.provider}: ${cloudData.folderPath}`);
-          }
-        })
-        .catch((syncErr) => {
-          // Cloud sync failure does not break core alert pipeline
-          console.warn("Evidence cloud auto-sync background note:", syncErr?.message || syncErr);
-        });
-    }
-
-    // 5. Emit real-time incident event via Server-Sent Events (SSE)
+    // 6. Emit real-time incident event via Server-Sent Events (SSE)
     try {
       alertEmitter.emit(`alert:${userId}`, newAlert);
     } catch (emitterErr) {

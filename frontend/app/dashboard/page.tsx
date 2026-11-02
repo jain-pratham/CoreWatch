@@ -87,15 +87,18 @@ import UserSettingsView from '../../components/user-dashboard/UserSettingsView';
 import CloudStorageIntegrationView from '../../components/user-dashboard/CloudStorageIntegrationView';
 import AdminAccountView from '../../components/admin/AdminAccountView';
 import AdminNotificationsView from '../../components/admin/AdminNotificationsView';
+import CoreWatchLogo from '../../components/common/CoreWatchLogo';
 
 function DashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const urlTab = searchParams.get('tab');
+  const urlSubTab = (searchParams.get('subtab') as 'profile' | 'pass' | '2fa' | null) || 'profile';
   const [user, setUser] = useState<UserData | null>(null);
   const [loading, setLoading] = useState(true);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [activeTab, setActiveTab] = useState<string>(urlTab || 'dashboard');
+  const [activeSubTab, setActiveSubTab] = useState<'profile' | 'pass' | '2fa'>(urlSubTab);
 
   const handleSelectTab = (newTab: string) => {
     setActiveTab(newTab);
@@ -111,10 +114,16 @@ function DashboardContent() {
   }, [urlTab]);
 
   useEffect(() => {
+    if (urlSubTab) setActiveSubTab(urlSubTab);
+  }, [urlSubTab]);
+
+  useEffect(() => {
     const handlePopState = () => {
       const params = new URLSearchParams(window.location.search);
       const tabFromUrl = params.get('tab') || 'dashboard';
+      const subTabFromUrl = (params.get('subtab') as 'profile' | 'pass' | '2fa' | null) || 'profile';
       setActiveTab(tabFromUrl);
+      setActiveSubTab(subTabFromUrl);
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
@@ -1134,7 +1143,7 @@ function DashboardContent() {
   const isUserMode: boolean = (currentRole as any) !== 'admin' || previewUserMode;
   if (isUserMode) {
     return (
-      <div className="relative">
+      <div className="dark relative">
         {currentRole === 'admin' && (
           <div className="bg-orange-600 text-white text-xs font-bold py-1 px-4 flex items-center justify-between sticky top-0 z-[60]">
             <span>Admin Preview Mode (Viewing User Dashboard UI)</span>
@@ -1164,6 +1173,7 @@ function DashboardContent() {
           isCameraLimitReached={isCameraLimitReached}
           activeTab={activeTab}
           setActiveTab={handleSelectTab}
+          subtab={activeSubTab}
           onLogout={() => { localStorage.clear(); router.push('/login'); }}
           openViewModal={openViewModal}
           openSettingsModal={openSettingsModal}
@@ -1264,9 +1274,9 @@ function DashboardContent() {
         logoIcon={LayoutDashboard}
         logoTitle="COREWATCH"
         logoSubtitle="Control Center"
-        profileHref="/dashboard?tab=profile"
-        changePasswordHref="/dashboard?tab=profile"
-        twoFactorHref="/dashboard?tab=profile"
+        profileHref={currentRole === 'admin' ? "/dashboard?tab=admin_profile&subtab=profile" : "/dashboard?tab=profile&subtab=profile"}
+        changePasswordHref={currentRole === 'admin' ? "/dashboard?tab=admin_profile&subtab=pass" : "/dashboard?tab=profile&subtab=pass"}
+        twoFactorHref={currentRole === 'admin' ? "/dashboard?tab=admin_profile&subtab=2fa" : "/dashboard?tab=profile&subtab=2fa"}
         mobileOpen={isMobileOpen}
         onClose={() => setIsMobileOpen(false)}
         collapsed={sidebarCollapsed}
@@ -1289,7 +1299,11 @@ function DashboardContent() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
-<h1 className="text-lg font-bold text-foreground capitalize">
+            <div className="flex items-center gap-2.5 lg:hidden">
+              <CoreWatchLogo className="h-8 w-auto" />
+              <span className="text-lg font-black tracking-tight text-foreground">CoreWatch</span>
+            </div>
+            <h1 className="text-lg font-bold text-foreground capitalize hidden lg:block">
               {activeTab.replace('_', ' ')}
             </h1>
           </div>
@@ -2285,6 +2299,7 @@ function DashboardContent() {
                   camerasCount={cameras.length}
                   alertsCount={dbAlerts.length}
                   onNavigateTab={handleSelectTab}
+                  initialSubTab={activeSubTab}
                 />
               )}
 

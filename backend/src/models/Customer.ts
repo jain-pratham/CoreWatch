@@ -72,6 +72,10 @@ const CustomerSchema = new Schema(
       rootFolderId: { type: String, default: null },
       userEmail: { type: String, default: null },
     },
+    systemSettings: {
+      type: Schema.Types.Mixed,
+      default: {},
+    },
   },
   {
     timestamps: true,

@@ -84,6 +84,57 @@ export const protect = async (
   }
 };
 
+/**
+ * Optional authentication: Populates req.user if Bearer token is provided,
+ * but does not reject request if token is absent (useful for internal service calls passing verified userId in payload).
+ */
+export const optionalProtect = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  if (
+    req.headers.authorization &&
+    req.headers.authorization.startsWith("Bearer")
+  ) {
+    try {
+      const token = req.headers.authorization.split(" ")[1];
+      const decoded: any = jwt.verify(
+        token,
+        process.env.JWT_SECRET || "super_secret_corewatch_key_2026"
+      );
+      const userId = decoded.id || decoded.userId || decoded._id;
+
+      if (userId) {
+        req.user = await User.findById(userId).select("-password");
+      }
+
+      if (!req.user && userId) {
+        try {
+          const Customer = require("../models/Customer").default;
+          const cust = await Customer.findById(userId);
+          if (cust?.user) {
+            req.user = await User.findById(cust.user).select("-password");
+          }
+          if (!req.user && cust) {
+            req.user = cust;
+          }
+        } catch (e) {}
+      }
+
+      const candidateEmail = (req.headers["x-user-email"] as string) || decoded.email;
+      if (!req.user && candidateEmail) {
+        const cleanEmail = candidateEmail.toLowerCase().trim();
+        req.user = await User.findOne({ email: cleanEmail }).select("-password");
+      }
+    } catch (error) {
+      // Token expired or invalid, continue without req.user
+    }
+  }
+
+  next();
+};
+
 export const isAdmin = (
   req: AuthenticatedRequest,
   res: Response,
